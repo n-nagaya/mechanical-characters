@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>機械キャラクタの計算論的設計 — Interactive Design Tool</title>
+<style>
+  :root {
+    --blueprint: #0f2b3d;
+    --gridline: #1d4258;
+    --ivory: #ede6d6;
+    --ivory-dim: #d9cfb8;
+    --brass: #c9a227;
+    --brass-bright: #e8c74a;
+    --vermilion: #e4572e;
+    --ink: #22303a;
+    --ink-soft: #4a5a66;
+    --panel: #f3edde;
+    --line-pale: #bfe3f2;
+    --ok: #3e8e5a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--ink);
+    font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic Medium", "Noto Sans JP", sans-serif;
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--blueprint);
+    color: var(--ivory);
+    padding: 14px 22px 12px;
+    border-bottom: 3px solid var(--brass);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 {
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+    font-size: 21px; font-weight: 600; letter-spacing: 0.06em;
+  }
+  header .sub {
+    font-family: "SF Mono", Consolas, "Courier New", monospace;
+    font-size: 11px; color: var(--line-pale); opacity: 0.85; letter-spacing: 0.04em;
+  }
+  main { flex: 1; display: flex; gap: 0; align-items: stretch; }
+  /* ---- drafting sheet ---- */
+  #sheetWrap { flex: 1; min-width: 0; background: var(--blueprint); position: relative; padding: 14px; display:flex; }
+  #sheet { position: relative; flex: 1; border: 1px solid var(--line-pale); outline: 1px solid rgba(191,227,242,.25); outline-offset: 4px; }
+  canvas#cv { position:absolute; inset:0; width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+  /* title block (図面枠) */
+  #titleBlock {
+    position: absolute; right: 10px; bottom: 10px;
+    border: 1px solid var(--line-pale); background: rgba(15,43,61,0.88);
+    color: var(--line-pale); font-family: "SF Mono", Consolas, monospace;
+    font-size: 10px; min-width: 235px; pointer-events: none;
+  }
+  #titleBlock .tb-row { display: flex; border-top: 1px solid rgba(191,227,242,.4); }
+  #titleBlock .tb-row:first-child { border-top: none; }
+  #titleBlock .tb-k { width: 88px; padding: 4px 7px; border-right: 1px solid rgba(191,227,242,.4); opacity: .75; }
+  #titleBlock .tb-v { flex: 1; padding: 4px 7px; color: var(--ivory); }
+  #titleBlock .tb-v.brass { color: var(--brass-bright); }
+  #hint {
+    position: absolute; left: 12px; top: 10px; color: var(--line-pale);
+    font-size: 12px; background: rgba(15,43,61,.8); padding: 6px 10px;
+    border-left: 3px solid var(--brass); max-width: 420px; line-height: 1.6;
+  }
+  /* ---- control rail ---- */
+  aside {
+    width: 330px; flex-shrink: 0; background: var(--panel); overflow-y: auto;
+    border-left: 3px solid var(--brass); padding: 16px 16px 24px;
+  }
+  .step { margin-bottom: 18px; }
+  .step-head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+  .step-no {
+    font-family: "SF Mono", Consolas, monospace; font-size: 11px;
+    background: var(--ink); color: var(--brass-bright);
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    border-radius: 2px; flex-shrink: 0;
+  }
+  .step-head h2 {
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+    font-size: 15px; font-weight: 600; letter-spacing: .04em;
+  }
+  .step .desc { font-size: 11.5px; color: var(--ink-soft); line-height: 1.65; margin-bottom: 8px; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button {
+    font-family: inherit; font-size: 12.5px; padding: 7px 12px;
+    background: var(--ivory); color: var(--ink);
+    border: 1px solid var(--ink-soft); border-radius: 2px; cursor: pointer;
+    transition: background .12s;
+  }
+  button:hover:not(:disabled) { background: var(--ivory-dim); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.primary { background: var(--ink); color: var(--ivory); border-color: var(--ink); }
+  button.primary:hover:not(:disabled) { background: #33454f; }
+  button.brassbtn { background: var(--brass); border-color: #9a7c1c; color: #201a06; font-weight: 600; }
+  button.brassbtn:hover:not(:disabled) { background: var(--brass-bright); }
+  .progress { height: 6px; background: #d8cfba; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress > div { height: 100%; width: 0%; background: var(--brass); transition: width .15s; }
+  .status { font-family: "SF Mono", Consolas, monospace; font-size: 10.5px; color: var(--ink-soft); margin-top: 5px; }
+  /* candidate cards */
+  #cands { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+  .cand {
+    display: flex; gap: 10px; align-items: center; padding: 7px;
+    border: 1px solid #c9bfa6; background: var(--ivory); cursor: pointer; border-radius: 2px;
+  }
+  .cand:hover { border-color: var(--ink-soft); }
+  .cand.sel { border: 2px solid var(--brass); background: #fbf6e7; }
+  .cand canvas { background: var(--blueprint); border-radius: 2px; flex-shrink: 0; }
+  .cand .meta { font-size: 11.5px; line-height: 1.55; }
+  .cand .meta b { font-size: 12.5px; }
+  .cand .score { font-family: "SF Mono", Consolas, monospace; font-size: 10px; color: var(--ink-soft); }
+  .toggles { display: flex; flex-direction: column; gap: 5px; font-size: 12px; margin-top: 6px; }
+  .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  input[type=range] { width: 100%; accent-color: var(--brass); }
+  .legend { display:flex; gap:14px; margin-top:8px; font-size:11px; color:var(--ink-soft); flex-wrap: wrap;}
+  .legend span::before { content:""; display:inline-block; width:16px; height:3px; margin-right:5px; vertical-align:middle; border-radius:2px;}
+  .lg-target::before { background: var(--vermilion); }
+  .lg-trace::before { background: var(--brass-bright); }
+  .lg-link::before { background: var(--ivory); border:1px solid #999; }
+  footer {
+    background: var(--blueprint); color: var(--line-pale);
+    font-size: 11px; line-height: 1.7; padding: 10px 22px; border-top: 1px solid var(--gridline);
+  }
+  footer b { color: var(--ivory); }
+  @media (max-width: 900px) {
+    main { flex-direction: column; }
+    aside { width: 100%; border-left: none; border-top: 3px solid var(--brass); }
+    #sheetWrap { min-height: 58vh; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>機械キャラクタの計算論的設計</h1>
+  <span class="sub">COMPUTATIONAL DESIGN OF MECHANICAL CHARACTERS — Coros et al., SIGGRAPH 2013 / interactive implementation</span>
+</header>
+
+<main>
+  <div id="sheetWrap">
+    <div id="sheet">
+      <canvas id="cv"></canvas>
+      <div id="hint">目標とする<b>閉曲線</b>をこの図面上にドラッグで描いてください(プリセットも可)。描いた曲線を最もよく再現する機構をデータベースから検索し、パラメータを連続最適化します。</div>
+      <div id="titleBlock">
+        <div class="tb-row"><div class="tb-k">SHEET</div><div class="tb-v">MC-2013 / 設計図</div></div>
+        <div class="tb-row"><div class="tb-k">機構種別</div><div class="tb-v brass" id="tbMech">—</div></div>
+        <div class="tb-row"><div class="tb-k">DB サンプル</div><div class="tb-v" id="tbDb">building…</div></div>
+        <div class="tb-row"><div class="tb-k">目的関数 F</div><div class="tb-v" id="tbObj">—</div></div>
+        <div class="tb-row"><div class="tb-k">位相 α</div><div class="tb-v" id="tbPhase">—</div></div>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <div class="step">
+      <div class="step-head"><div class="step-no">01</div><h2>目標曲線を描く</h2></div>
+      <div class="desc">キャラクタの部位に描かせたい周期軌道(モーションカーブ)を指定します。フリーハンド描画、またはプリセット:</div>
+      <div class="btn-row">
+        <button id="btnClear">消去</button>
+        <button data-preset="ellipse">楕円</button>
+        <button data-preset="bean">豆型</button>
+        <button data-preset="eight">8の字</button>
+        <button data-preset="tri">おむすび</button>
+        <button data-preset="walk">歩行軌道</button>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><div class="step-no">02</div><h2>機構を検索</h2></div>
+      <div class="desc">事前サンプリング済みデータベース(4節リンク・歯車駆動5節リンク・クランクスライダ)から、曲線特徴量メトリック(長さ・面積・楕円率・自己交差 + 頂点距離)で最良候補を検索します。</div>
+      <button id="btnSearch" class="primary" disabled>データベースを検索</button>
+      <div class="progress"><div id="dbProg"></div></div>
+      <div class="status" id="dbStatus">機構データベースを構築中…</div>
+      <div id="cands"></div>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><div class="step-no">03</div><h2>パラメータ最適化</h2></div>
+      <div class="desc">選択した機構の寸法・取付点・配置を Nelder–Mead 法で連続最適化し、マーカー点の軌跡と目標曲線の二乗誤差(論文 式(2) 相当)を最小化します。</div>
+      <button id="btnOpt" class="brassbtn" disabled>最適化を実行</button>
+      <div class="progress"><div id="optProg"></div></div>
+      <div class="status" id="optStatus">—</div>
+    </div>
+
+    <div class="step">
+      <div class="step-head"><div class="step-no">04</div><h2>駆動・確認</h2></div>
+      <div class="desc">単一の入力ドライバ(クランク)で機構を駆動し、軌跡を確認します。</div>
+      <div class="btn-row">
+        <button id="btnPlay" disabled>▶ 再生</button>
+      </div>
+      <div style="margin-top:8px; font-size:12px;">駆動速度
+        <input type="range" id="speed" min="0.2" max="3" step="0.1" value="1">
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="showTarget" checked> 目標曲線を表示</label>
+        <label><input type="checkbox" id="showTrace" checked> マーカー軌跡を表示</label>
+        <label><input type="checkbox" id="showGears" checked> 歯車を表示</label>
+      </div>
+      <div class="legend">
+        <span class="lg-target">目標曲線</span>
+        <span class="lg-trace">機構の軌跡</span>
+        <span class="lg-link">リンク</span>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <b>実装範囲:</b> 論文の対話的パイプラインの中核 — ①モーションカーブのスケッチ入力 → ②パラメータ空間の疎サンプリングによる機構データベース検索(特徴量ベース曲線メトリック)→ ③連続パラメータ最適化 → ④単一ドライバによる周期駆動。
+  <b>簡略化:</b> 曲線メトリックの係数は学習でなく固定値、最適化は勾配(陰関数定理+BFGS)の代わりに Nelder–Mead、歯車列の自動生成・衝突回避レイヤ配置・支持構造生成・3Dプリント出力は対象外です。
+</footer>
+
+<script>
+"use strict";
+// ================================================================
+//  Core: kinematics / curve metric / optimizer  (validated in Node)
+// ================================================================
+const NPHASE = 72;
+
+function circleInt(p0, r0, p1, r1, sign) {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 1e-9) return null;
+  const a = (r0 * r0 - r1 * r1 + d * d) / (2 * d);
+  const h2 = r0 * r0 - a * a;
+  if (h2 < 0) return null;
+  const h = Math.sqrt(h2);
+  const mx = p0.x + a * dx / d, my = p0.y + a * dy / d;
+  return { x: mx - sign * dy * h / d, y: my + sign * dx * h / d };
+}
+
+const MECHS = {
+  fourbar: {
+    name: "4節リンク機構", dim: 6,
+    randomParams(r) { return [0.5 + r() * 1.0, 1.0 + r() * 2.5, 1.0 + r() * 2.5, 1.4 + r() * 2.2, -0.4 + r() * 1.8, -1.4 + r() * 2.8]; },
+    bounds: [[0.25, 2.2], [0.6, 4.5], [0.6, 4.5], [0.8, 4.5], [-1.0, 2.2], [-2.2, 2.2]],
+    simulate(p, withFrames) {
+      const [a, b, c, d, u, v] = p;
+      const O2 = { x: 0, y: 0 }, O4 = { x: d, y: 0 };
+      const curve = [], frames = withFrames ? [] : null;
+      let prevB = null, sign = 1;
+      for (let i = 0; i < NPHASE; i++) {
+        const th = 2 * Math.PI * i / NPHASE;
+        const A = { x: a * Math.cos(th), y: a * Math.sin(th) };
+        let B = circleInt(A, b, O4, c, sign);
+        if (i === 0) { if (!B) { sign = -1; B = circleInt(A, b, O4, c, sign); } }
+        else if (B && prevB) {
+          const B2 = circleInt(A, b, O4, c, -sign);
+          if (B2 && Math.hypot(B2.x - prevB.x, B2.y - prevB.y) < Math.hypot(B.x - prevB.x, B.y - prevB.y)) return null;
+        }
+        if (!B) return null;
+        if (prevB && Math.hypot(B.x - prevB.x, B.y - prevB.y) > 0.9 * (a + b)) return null;
+        prevB = B;
+        const ex = B.x - A.x, ey = B.y - A.y;
+        const P = { x: A.x + u * ex - v * ey, y: A.y + u * ey + v * ex };
+        curve.push(P);
+        if (frames) frames.push({ pivots: [O2, O4], links: [[O2, A], [A, B], [O4, B], [A, P], [B, P]], joints: [A, B], marker: P, gears: [{ c: O2, r: a * 0.8, phase: th }] });
+      }
+      return { curve, frames };
+    }
+  },
+  fivebar: {
+    name: "歯車駆動5節リンク機構", dim: 8, ratios: [-2, -1, 1, 2],
+    randomParams(r) { return [0.4 + r() * 1.0, 0.4 + r() * 1.0, 1.0 + r() * 2.2, 1.0 + r() * 2.2, 1.2 + r() * 2.0, r() * 2 * Math.PI, 0.1 + r() * 1.2, -1.0 + r() * 2.0]; },
+    bounds: [[0.2, 2.0], [0.2, 2.0], [0.5, 4.0], [0.5, 4.0], [0.7, 4.0], [-10, 10], [-0.5, 2.0], [-2.0, 2.0]],
+    simulate(p, withFrames, ratio) {
+      const [a1, a2, l1, l2, d, phi2, u, v] = p; const r = ratio;
+      const O1 = { x: 0, y: 0 }, O2 = { x: d, y: 0 };
+      const curve = [], frames = withFrames ? [] : null;
+      let prevE = null, sign = 1;
+      const g1 = d * Math.abs(r) / (1 + Math.abs(r)), g2 = d - g1;
+      for (let i = 0; i < NPHASE; i++) {
+        const th = 2 * Math.PI * i / NPHASE;
+        const A1 = { x: a1 * Math.cos(th), y: a1 * Math.sin(th) };
+        const th2 = r * th + phi2;
+        const A2 = { x: O2.x + a2 * Math.cos(th2), y: a2 * Math.sin(th2) };
+        let E = circleInt(A1, l1, A2, l2, sign);
+        if (i === 0) { if (!E) { sign = -1; E = circleInt(A1, l1, A2, l2, sign); } }
+        if (!E) return null;
+        if (prevE && Math.hypot(E.x - prevE.x, E.y - prevE.y) > 0.8 * (l1 + l2)) return null;
+        prevE = E;
+        const ex = E.x - A1.x, ey = E.y - A1.y;
+        const P = { x: A1.x + u * ex - v * ey, y: A1.y + u * ey + v * ex };
+        curve.push(P);
+        if (frames) frames.push({ pivots: [O1, O2], links: [[O1, A1], [O2, A2], [A1, E], [A2, E], [A1, P], [E, P]], joints: [A1, A2, E], marker: P, gears: [{ c: O1, r: g1, phase: th }, { c: O2, r: g2, phase: th2 }] });
+      }
+      return { curve, frames };
+    }
+  },
+  slider: {
+    name: "クランク・スライダ機構", dim: 5,
+    randomParams(r) { return [0.5 + r() * 1.0, 1.6 + r() * 2.2, -0.8 + r() * 1.6, 0.2 + r() * 1.6, -1.2 + r() * 2.4]; },
+    bounds: [[0.25, 2.0], [1.0, 4.5], [-1.6, 1.6], [-0.5, 2.2], [-2.2, 2.2]],
+    simulate(p, withFrames) {
+      const [a, b, e, u, v] = p;
+      const O = { x: 0, y: 0 };
+      const curve = [], frames = withFrames ? [] : null;
+      for (let i = 0; i < NPHASE; i++) {
+        const th = 2 * Math.PI * i / NPHASE;
+        const A = { x: a * Math.cos(th), y: a * Math.sin(th) };
+        const dy = A.y - e, disc = b * b - dy * dy;
+        if (disc < 0) return null;
+        const S = { x: A.x + Math.sqrt(disc), y: e };
+        const ex = S.x - A.x, ey = S.y - A.y;
+        const P = { x: A.x + u * ex - v * ey, y: A.y + u * ey + v * ex };
+        curve.push(P);
+        if (frames) frames.push({ pivots: [O], links: [[O, A], [A, S], [A, P], [S, P]], joints: [A], marker: P, slider: S, sliderLine: e, gears: [{ c: O, r: a * 0.8, phase: th }] });
+      }
+      return { curve, frames };
+    }
+  }
+};
+
+function resampleClosed(pts, n) {
+  const m = pts.length;
+  if (m < 3) return null;
+  const seg = [], cum = [0];
+  let total = 0;
+  for (let i = 0; i < m; i++) {
+    const q = pts[(i + 1) % m];
+    const L = Math.hypot(q.x - pts[i].x, q.y - pts[i].y);
+    seg.push(L); total += L; cum.push(total);
+  }
+  if (total < 1e-9) return null;
+  const out = [];
+  let j = 0;
+  for (let k = 0; k < n; k++) {
+    const s = total * k / n;
+    while (j < m - 1 && cum[j + 1] < s) j++;
+    const p0 = pts[j % m], p1 = pts[(j + 1) % m];
+    const t = seg[j] > 1e-12 ? (s - cum[j]) / seg[j] : 0;
+    out.push({ x: p0.x + t * (p1.x - p0.x), y: p0.y + t * (p1.y - p0.y) });
+  }
+  return out;
+}
+
+function segIntersects(p, p2, q, q2) {
+  const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d1 = d(q, q2, p), d2 = d(q, q2, p2), d3 = d(p, p2, q), d4 = d(p, p2, q2);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+}
+
+function curveFeatures(ptsIn) {
+  const pts = resampleClosed(ptsIn, NPHASE);
+  if (!pts) return null;
+  const n = pts.length;
+  let cx = 0, cy = 0;
+  for (const p of pts) { cx += p.x; cy += p.y; }
+  cx /= n; cy /= n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (const p of pts) { const dx = p.x - cx, dy = p.y - cy; sxx += dx * dx; sxy += dx * dy; syy += dy * dy; }
+  const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const ca = Math.cos(-ang), sa = Math.sin(-ang);
+  const rot = pts.map(p => ({ x: (p.x - cx) * ca - (p.y - cy) * sa, y: (p.x - cx) * sa + (p.y - cy) * ca }));
+  let xmin = 1e18, xmax = -1e18, ymin = 1e18, ymax = -1e18;
+  for (const p of rot) { if (p.x < xmin) xmin = p.x; if (p.x > xmax) xmax = p.x; if (p.y < ymin) ymin = p.y; if (p.y > ymax) ymax = p.y; }
+  let lmax = Math.max(xmax - xmin, 1e-9), lmin = Math.max(ymax - ymin, 0);
+  if (lmin > lmax) { const t = lmax; lmax = lmin; lmin = t; }
+  const norm = rot.map(p => ({ x: p.x / lmax, y: p.y / lmax }));
+  let length = 0, area = 0;
+  for (let i = 0; i < n; i++) {
+    const q = norm[(i + 1) % n];
+    length += Math.hypot(q.x - norm[i].x, q.y - norm[i].y);
+    area += norm[i].x * q.y - q.x * norm[i].y;
+  }
+  area = Math.abs(area) / 2;
+  const ellipticity = lmin / lmax;
+  let inter = 0;
+  const step = 3;
+  for (let i = 0; i < n; i += step) {
+    const a0 = norm[i], a1 = norm[(i + step) % n];
+    for (let j2 = i + 2 * step; j2 < n; j2 += step) {
+      if (i === 0 && j2 + step >= n) continue;
+      const b0 = norm[j2 % n], b1 = norm[(j2 + step) % n];
+      if (segIntersects(a0, a1, b0, b1)) inter++;
+    }
+  }
+  return { feat: [length, area, ellipticity, Math.min(inter, 6)], norm, centroid: { x: cx, y: cy }, angle: ang, lmax };
+}
+
+const FW = [1.0, 2.0, 2.5, 0.35];
+function featDist(f1, f2) { let s = 0; for (let i = 0; i < f1.length; i++) { const d = f1[i] - f2[i]; s += FW[i] * d * d; } return s; }
+
+function dPos(a, b) {
+  const n = a.length;
+  let best = Infinity;
+  for (const dir of [1, -1]) {
+    for (let off = 0; off < n; off += 2) {
+      let s = 0;
+      for (let k = 0; k < n; k++) {
+        const bi = ((dir === 1 ? k + off : off - k) % n + n) % n;
+        const dx = a[k].x - b[bi].x, dy = a[k].y - b[bi].y;
+        s += dx * dx + dy * dy;
+        if (s > best) break;
+      }
+      if (s < best) best = s;
+    }
+  }
+  return best / n;
+}
+
+function makeNelderMead(f, x0, maxIter) {
+  const n = x0.length;
+  let simplex = [x0.slice()];
+  for (let i = 0; i < n; i++) {
+    const x = x0.slice();
+    x[i] += (Math.abs(x[i]) > 1e-6 ? Math.abs(x[i]) : 0.1) * 0.08;
+    simplex.push(x);
+  }
+  let fv = simplex.map(f), it = 0;
+  return {
+    step(chunk) {
+      for (let c = 0; c < chunk && it < maxIter; c++, it++) {
+        const idx = fv.map((v, i) => i).sort((a, b) => fv[a] - fv[b]);
+        simplex = idx.map(i => simplex[i]); fv = idx.map(i => fv[i]);
+        const cen = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) cen[j] += simplex[i][j] / n;
+        const xr = cen.map((cc, j) => cc + (cc - simplex[n][j]));
+        const fr = f(xr);
+        if (fr < fv[0]) {
+          const xe = cen.map((cc, j) => cc + 2 * (cc - simplex[n][j]));
+          const fe = f(xe);
+          if (fe < fr) { simplex[n] = xe; fv[n] = fe; } else { simplex[n] = xr; fv[n] = fr; }
+        } else if (fr < fv[n - 1]) { simplex[n] = xr; fv[n] = fr; }
+        else {
+          const xc = cen.map((cc, j) => cc + 0.5 * (simplex[n][j] - cc));
+          const fc = f(xc);
+          if (fc < fv[n]) { simplex[n] = xc; fv[n] = fc; }
+          else for (let i = 1; i <= n; i++) {
+            for (let j = 0; j < n; j++) simplex[i][j] = simplex[0][j] + 0.5 * (simplex[i][j] - simplex[0][j]);
+            fv[i] = f(simplex[i]);
+          }
+        }
+      }
+      let bi = 0; for (let i = 1; i <= n; i++) if (fv[i] < fv[bi]) bi = i;
+      return { x: simplex[bi], f: fv[bi], done: it >= maxIter, it };
+    }
+  };
+}
+
+// ================================================================
+//  Application state
+// ================================================================
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+const state = {
+  dbReady: false,
+  db: [],
+  target: null,        // raw points (canvas coords)
+  targetRs: null,      // resampled NPHASE
+  targetFeat: null,
+  drawing: false,
+  drawPts: [],
+  candidates: [],
+  selected: null,      // {entry, mirror, x (param vector incl. transform)}
+  optimizedX: null,
+  playing: false,
+  phase: 0,
+  speed: 1,
+  objVal: null
+};
+
+function resize() {
+  const sheet = document.getElementById("sheet");
+  const r = sheet.getBoundingClientRect();
+  W = Math.max(200, r.width); H = Math.max(200, r.height);
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  render();
+}
+window.addEventListener("resize", resize);
+
+// ---------------- Database build (chunked) ----------------
+let seed = 987654321;
+function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+const DB_TARGET_PER_TYPE = 260;
+const dbCounts = { fourbar: 0, fivebar: 0, slider: 0 };
+function buildDB() {
+  const keys = Object.keys(MECHS);
+  let ki = 0, attempts = 0;
+  function chunk() {
+    const t0 = performance.now();
+    while (performance.now() - t0 < 14) {
+      const key = keys[ki];
+      const M = MECHS[key];
+      if (dbCounts[key] >= DB_TARGET_PER_TYPE || attempts > 30000) { ki++; attempts = 0; if (ki >= keys.length) { finishDB(); return; } continue; }
+      attempts++;
+      const p = M.randomParams(rnd);
+      const ratio = M.ratios ? M.ratios[attempts % 4] : undefined;
+      const res = M.simulate(p, false, ratio);
+      if (!res) continue;
+      const f = curveFeatures(res.curve);
+      if (!f || f.feat[0] < 0.1) continue;
+      let close = false;
+      for (const e of state.db) { if (e.mech === key && featDist(e.f.feat, f.feat) < 0.0004) { close = true; break; } }
+      if (close) continue;
+      state.db.push({ mech: key, params: p, ratio, f });
+      dbCounts[key]++;
+    }
+    const total = state.db.length, goal = DB_TARGET_PER_TYPE * keys.length;
+    document.getElementById("dbProg").style.width = Math.min(100, 100 * total / goal) + "%";
+    document.getElementById("dbStatus").textContent = `構築中… ${total} / ${goal} サンプル`;
+    document.getElementById("tbDb").textContent = `${total} curves`;
+    requestAnimationFrame(chunk);
+  }
+  requestAnimationFrame(chunk);
+}
+function finishDB() {
+  state.dbReady = true;
+  const total = state.db.length;
+  document.getElementById("dbProg").style.width = "100%";
+  document.getElementById("dbStatus").textContent = `構築完了:${total} サンプル(4節 ${dbCounts.fourbar} / 5節 ${dbCounts.fivebar} / スライダ ${dbCounts.slider})`;
+  document.getElementById("tbDb").textContent = `${total} curves`;
+  updateButtons();
+}
+
+// ---------------- Target curve input ----------------
+function canvasPos(ev) {
+  const r = cv.getBoundingClientRect();
+  return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+}
+cv.addEventListener("pointerdown", ev => {
+  ev.preventDefault();
+  cv.setPointerCapture(ev.pointerId);
+  state.drawing = true;
+  state.drawPts = [canvasPos(ev)];
+  stopPlayback();
+});
+cv.addEventListener("pointermove", ev => {
+  if (!state.drawing) return;
+  const p = canvasPos(ev);
+  const last = state.drawPts[state.drawPts.length - 1];
+  if (Math.hypot(p.x - last.x, p.y - last.y) > 2.5) state.drawPts.push(p);
+  render();
+});
+cv.addEventListener("pointerup", () => {
+  if (!state.drawing) return;
+  state.drawing = false;
+  if (state.drawPts.length > 12) setTarget(state.drawPts);
+  else render();
+});
+
+function setTarget(pts) {
+  const rs = resampleClosed(pts, NPHASE);
+  const f = rs ? curveFeatures(rs) : null;
+  if (!rs || !f) return;
+  state.target = pts.slice();
+  state.targetRs = rs;
+  state.targetFeat = f;
+  state.candidates = [];
+  state.selected = null;
+  state.optimizedX = null;
+  state.objVal = null;
+  document.getElementById("cands").innerHTML = "";
+  document.getElementById("tbMech").textContent = "—";
+  document.getElementById("tbObj").textContent = "—";
+  document.getElementById("optStatus").textContent = "—";
+  document.getElementById("optProg").style.width = "0%";
+  document.getElementById("hint").style.display = "none";
+  stopPlayback();
+  updateButtons();
+  render();
+}
+
+const PRESETS = {
+  ellipse: t => ({ x: Math.cos(t), y: 0.55 * Math.sin(t) }),
+  bean: t => { const r = 1 + 0.35 * Math.cos(2 * t); return { x: r * Math.cos(t), y: 0.7 * r * Math.sin(t) }; },
+  eight: t => ({ x: Math.sin(t), y: 0.6 * Math.sin(t) * Math.cos(t) * 2 }),
+  tri: t => { const r = 1 + 0.22 * Math.cos(3 * t + Math.PI); return { x: r * Math.cos(t), y: r * Math.sin(t) }; },
+  walk: t => ({ x: Math.cos(t), y: 0.45 * Math.sin(t) + 0.28 * Math.sin(2 * t) })
+};
+document.querySelectorAll("[data-preset]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const fn = PRESETS[btn.dataset.preset];
+    const cx = W * 0.46, cy = H * 0.5, sc = Math.min(W, H) * 0.24;
+    const pts = [];
+    for (let i = 0; i < 120; i++) {
+      const t = 2 * Math.PI * i / 120;
+      const p = fn(t);
+      pts.push({ x: cx + sc * p.x, y: cy - sc * p.y });
+    }
+    setTarget(pts);
+  });
+});
+document.getElementById("btnClear").addEventListener("click", () => {
+  state.target = null; state.targetRs = null; state.targetFeat = null;
+  state.candidates = []; state.selected = null; state.optimizedX = null; state.objVal = null;
+  document.getElementById("cands").innerHTML = "";
+  document.getElementById("tbMech").textContent = "—";
+  document.getElementById("tbObj").textContent = "—";
+  document.getElementById("hint").style.display = "";
+  stopPlayback(); updateButtons(); render();
+});
+
+// ---------------- Transform helpers ----------------
+// world = t + s * R(psi) * Mirror * normalized_local(p)
+function makeMapper(f, psi, s, tx, ty, mirror) {
+  const caL = Math.cos(-f.angle), saL = Math.sin(-f.angle);
+  const cp = Math.cos(psi), sp = Math.sin(psi);
+  const cx = f.centroid.x, cy = f.centroid.y, il = 1 / f.lmax;
+  return p => {
+    let x = ((p.x - cx) * caL - (p.y - cy) * saL) * il;
+    let y = ((p.x - cx) * saL + (p.y - cy) * caL) * il;
+    if (mirror) y = -y;
+    return { x: tx + s * (x * cp - y * sp), y: ty + s * (x * sp + y * cp) };
+  };
+}
+
+function objFactory(mech, ratio, mirror) {
+  const targetRs = state.targetRs;
+  return function (x) {
+    const dim = mech.dim;
+    for (let i = 0; i < dim; i++) {
+      const [lo, hi] = mech.bounds[i];
+      if (x[i] < lo || x[i] > hi) return 1e9;
+    }
+    const res = mech.simulate(x.slice(0, dim), false, ratio);
+    if (!res) return 1e9;
+    const f = curveFeatures(res.curve);
+    if (!f) return 1e9;
+    const psi = x[dim], s = Math.exp(x[dim + 1]), tx = x[dim + 2], ty = x[dim + 3];
+    const map = makeMapper(f, psi, s, tx, ty, mirror);
+    const world = res.curve.map(map);
+    const rs = resampleClosed(world, NPHASE);
+    if (!rs) return 1e9;
+    let best = Infinity;
+    for (const dir of [1, -1]) {
+      for (let off = 0; off < NPHASE; off += 3) {
+        let acc = 0;
+        for (let k = 0; k < NPHASE; k++) {
+          const bi = ((dir === 1 ? k + off : off - k) % NPHASE + NPHASE) % NPHASE;
+          const dx = targetRs[k].x - rs[bi].x, dy = targetRs[k].y - rs[bi].y;
+          acc += dx * dx + dy * dy;
+          if (acc > best) break;
+        }
+        if (acc < best) best = acc;
+      }
+    }
+    return best / NPHASE;
+  };
+}
+
+// ---------------- Search ----------------
+document.getElementById("btnSearch").addEventListener("click", () => {
+  if (!state.dbReady || !state.targetFeat) return;
+  const tf = state.targetFeat;
+  const scored = state.db.map(e => ({ e, fd: featDist(tf.feat, e.f.feat) }))
+    .sort((a, b) => a.fd - b.fd).slice(0, 40);
+  for (const s of scored) s.dp = dPos(tf.norm, s.e.f.norm);
+  scored.sort((a, b) => (a.fd + 3 * a.dp) - (b.fd + 3 * b.dp));
+  // diversify: at most 2 per mech type in top-3 display
+  const picked = [];
+  for (const s of scored) {
+    if (picked.length >= 3) break;
+    if (picked.filter(p => p.e.mech === s.e.mech).length >= 2) continue;
+    picked.push(s);
+  }
+  state.candidates = picked;
+  renderCandidates();
+  if (picked.length) selectCandidate(0);
+});
+
+function renderCandidates() {
+  const box = document.getElementById("cands");
+  box.innerHTML = "";
+  state.candidates.forEach((s, i) => {
+    const div = document.createElement("div");
+    div.className = "cand";
+    const mini = document.createElement("canvas");
+    mini.width = 64; mini.height = 48;
+    const mc = mini.getContext("2d");
+    mc.strokeStyle = "#e8c74a"; mc.lineWidth = 1.5; mc.beginPath();
+    s.e.f.norm.forEach((p, k) => {
+      const x = 32 + p.x * 26, y = 24 - p.y * 26;
+      k ? mc.lineTo(x, y) : mc.moveTo(x, y);
+    });
+    mc.closePath(); mc.stroke();
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const score = (s.fd + 3 * s.dp);
+    meta.innerHTML = `<b>候補 ${i + 1}:${MECHS[s.e.mech].name}</b>${s.e.ratio !== undefined ? `(歯車比 ${s.e.ratio}:1)` : ""}<br><span class="score">metric d = ${score.toFixed(4)}</span>`;
+    div.appendChild(mini); div.appendChild(meta);
+    div.addEventListener("click", () => selectCandidate(i));
+    box.appendChild(div);
+  });
+}
+
+function selectCandidate(i) {
+  document.querySelectorAll(".cand").forEach((el, k) => el.classList.toggle("sel", k === i));
+  const s = state.candidates[i];
+  const mech = MECHS[s.e.mech];
+  const tf = state.targetFeat, bf = s.e.f;
+  // choose best rotation/mirror init
+  let best = null;
+  for (const mirror of [false, true]) {
+    for (const dpsi of [0, Math.PI]) {
+      const x0 = s.e.params.concat([tf.angle + dpsi, Math.log(tf.lmax), tf.centroid.x, tf.centroid.y]);
+      const obj = objFactory(mech, s.e.ratio, mirror);
+      const v = obj(x0);
+      if (!best || v < best.v) best = { x0, v, mirror, obj };
+    }
+  }
+  state.selected = { entry: s.e, mech, mirror: best.mirror, obj: best.obj, x: best.x0 };
+  state.optimizedX = best.x0.slice();
+  state.objVal = best.v;
+  document.getElementById("tbMech").textContent = mech.name + (s.e.ratio !== undefined ? ` r=${s.e.ratio}` : "");
+  document.getElementById("tbObj").textContent = best.v < 1e8 ? best.v.toFixed(1) + " px²(初期値)" : "実行不能";
+  document.getElementById("optStatus").textContent = `初期目的関数 F = ${best.v < 1e8 ? best.v.toFixed(1) : "∞"}(最適化前)`;
+  document.getElementById("optProg").style.width = "0%";
+  updateButtons();
+  startPlayback();
+}
+
+// ---------------- Optimization (chunked) ----------------
+let optRunning = false;
+document.getElementById("btnOpt").addEventListener("click", () => {
+  if (!state.selected || optRunning) return;
+  optRunning = true;
+  updateButtons();
+  const MAXIT = 450;
+  const nm = makeNelderMead(state.selected.obj, state.selected.x, MAXIT);
+  function step() {
+    const r = nm.step(20);
+    state.optimizedX = r.x;
+    state.objVal = r.f;
+    document.getElementById("optProg").style.width = (100 * r.it / MAXIT) + "%";
+    document.getElementById("optStatus").textContent = `反復 ${r.it}/${MAXIT} — F = ${r.f.toFixed(2)} px²(RMS ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
+    document.getElementById("tbObj").textContent = r.f.toFixed(1) + " px²";
+    if (!state.playing) render();
+    if (!r.done) requestAnimationFrame(step);
+    else {
+      optRunning = false;
+      document.getElementById("optStatus").textContent = `最適化完了 — F = ${r.f.toFixed(2)} px²(RMS誤差 ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
+      updateButtons();
+      startPlayback();
+    }
+  }
+  requestAnimationFrame(step);
+});
+
+// ---------------- Playback / rendering ----------------
+document.getElementById("btnPlay").addEventListener("click", () => {
+  state.playing ? stopPlayback() : startPlayback();
+});
+document.getElementById("speed").addEventListener("input", e => state.speed = parseFloat(e.target.value));
+["showTarget", "showTrace", "showGears"].forEach(id =>
+  document.getElementById(id).addEventListener("change", () => render()));
+
+let rafId = null, lastT = 0;
+function startPlayback() {
+  if (!state.selected) { render(); return; }
+  state.playing = true;
+  document.getElementById("btnPlay").textContent = "⏸ 停止";
+  lastT = performance.now();
+  if (rafId) cancelAnimationFrame(rafId);
+  const loop = t => {
+    const dt = (t - lastT) / 1000; lastT = t;
+    state.phase = (state.phase + dt * 0.55 * state.speed) % 1;
+    render();
+    if (state.playing) rafId = requestAnimationFrame(loop);
+  };
+  rafId = requestAnimationFrame(loop);
+  updateButtons();
+}
+function stopPlayback() {
+  state.playing = false;
+  document.getElementById("btnPlay").textContent = "▶ 再生";
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  render();
+}
+
+function drawGrid() {
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--blueprint");
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(191,227,242,0.09)";
+  ctx.lineWidth = 1;
+  const g = 28;
+  ctx.beginPath();
+  for (let x = g; x < W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = g; y < H; y += g) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(191,227,242,0.18)";
+  ctx.beginPath();
+  for (let x = g * 5; x < W; x += g * 5) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = g * 5; y < H; y += g * 5) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+  // corner registration marks
+  ctx.strokeStyle = "rgba(191,227,242,0.5)";
+  const m = 14;
+  [[m, m, 1, 1], [W - m, m, -1, 1], [m, H - m, 1, -1], [W - m, H - m, -1, -1]].forEach(([x, y, sx, sy]) => {
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x + 12 * sx, y);
+    ctx.moveTo(x, y); ctx.lineTo(x, y + 12 * sy);
+    ctx.stroke();
+  });
+}
+
+function drawCurve(pts, color, width, dash, closed = true) {
+  if (!pts || pts.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = width;
+  ctx.setLineDash(dash || []);
+  ctx.beginPath();
+  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  if (closed) ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawGear(c, r, phase, mirror) {
+  if (r < 3) r = 3;
+  const teeth = Math.max(8, Math.round(r / 4.5));
+  const ph = mirror ? -phase : phase;
+  ctx.save();
+  ctx.translate(c.x, c.y); ctx.rotate(ph);
+  ctx.fillStyle = "rgba(201,162,39,0.28)";
+  ctx.strokeStyle = "#c9a227"; ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  const ro = r, ri = r * 0.86;
+  for (let i = 0; i < teeth * 4; i++) {
+    const a = 2 * Math.PI * i / (teeth * 4);
+    const rr = (i % 4 < 2) ? ro : ri;
+    const x = rr * Math.cos(a), y = rr * Math.sin(a);
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, Math.max(2.5, r * 0.14), 0, 2 * Math.PI);
+  ctx.fillStyle = "#0f2b3d"; ctx.fill(); ctx.stroke();
+  // spoke marker
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(ri * 0.8, 0);
+  ctx.strokeStyle = "rgba(232,199,74,0.8)"; ctx.stroke();
+  ctx.restore();
+}
+
+function render() {
+  drawGrid();
+  const showT = document.getElementById("showTarget").checked;
+  const showTr = document.getElementById("showTrace").checked;
+  const showG = document.getElementById("showGears").checked;
+
+  // in-progress freehand
+  if (state.drawing && state.drawPts.length > 1) {
+    drawCurve(state.drawPts, "#e4572e", 2, [6, 4], false);
+  }
+  // target curve
+  if (showT && state.targetRs) {
+    drawCurve(state.targetRs, "#e4572e", 2.4, []);
+    ctx.fillStyle = "#e4572e";
+    ctx.font = "11px 'SF Mono', Consolas, monospace";
+    const p0 = state.targetRs[0];
+    ctx.fillText("target", p0.x + 8, p0.y - 8);
+  }
+
+  // mechanism
+  if (state.selected && state.optimizedX) {
+    const { mech, entry, mirror } = state.selected;
+    const x = state.optimizedX;
+    const dim = mech.dim;
+    const res = mech.simulate(x.slice(0, dim), true, entry.ratio);
+    if (res) {
+      const f = curveFeatures(res.curve);
+      if (f) {
+        const map = makeMapper(f, x[dim], Math.exp(x[dim + 1]), x[dim + 2], x[dim + 3], mirror);
+        const worldCurve = res.curve.map(map);
+        if (showTr) drawCurve(worldCurve, "rgba(232,199,74,0.9)", 1.8, [2, 3]);
+        const fi = Math.floor(state.phase * NPHASE) % NPHASE;
+        const fr = res.frames[fi];
+        const scaleLen = Math.exp(x[dim + 1]) / f.lmax;
+        // slider guide line
+        if (fr.slider) {
+          const a = map({ x: -6, y: fr.sliderLine }), b = map({ x: 10, y: fr.sliderLine });
+          ctx.save(); ctx.strokeStyle = "rgba(237,230,214,0.35)"; ctx.setLineDash([8, 6]); ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
+        }
+        // gears
+        if (showG) for (const g of fr.gears) drawGear(map(g.c), g.r * scaleLen, g.phase, mirror);
+        // links
+        ctx.save();
+        ctx.strokeStyle = "#ede6d6"; ctx.lineWidth = 3.4; ctx.lineCap = "round";
+        for (const [p, q] of fr.links) {
+          const a = map(p), b = map(q);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        }
+        ctx.restore();
+        // pivots (ground)
+        for (const pv of fr.pivots) {
+          const a = map(pv);
+          ctx.beginPath(); ctx.arc(a.x, a.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = "#0f2b3d"; ctx.fill();
+          ctx.strokeStyle = "#ede6d6"; ctx.lineWidth = 2; ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(a.x - 7, a.y + 9); ctx.lineTo(a.x + 7, a.y + 9);
+          ctx.strokeStyle = "rgba(237,230,214,0.6)"; ctx.lineWidth = 1.5; ctx.stroke();
+        }
+        // joints
+        for (const j of fr.joints) {
+          const a = map(j);
+          ctx.beginPath(); ctx.arc(a.x, a.y, 3.4, 0, 2 * Math.PI);
+          ctx.fillStyle = "#ede6d6"; ctx.fill();
+        }
+        // slider block
+        if (fr.slider) {
+          const a = map(fr.slider);
+          ctx.save(); ctx.translate(a.x, a.y);
+          ctx.fillStyle = "#ede6d6";
+          ctx.fillRect(-9, -6, 18, 12);
+          ctx.strokeStyle = "#0f2b3d"; ctx.strokeRect(-9, -6, 18, 12);
+          ctx.restore();
+        }
+        // marker point
+        const mp = map(fr.marker);
+        ctx.beginPath(); ctx.arc(mp.x, mp.y, 5.5, 0, 2 * Math.PI);
+        ctx.fillStyle = "#e8c74a"; ctx.fill();
+        ctx.strokeStyle = "#0f2b3d"; ctx.lineWidth = 1.6; ctx.stroke();
+        document.getElementById("tbPhase").textContent = (state.phase * 360).toFixed(0) + "°";
+      }
+    }
+  }
+}
+
+function updateButtons() {
+  document.getElementById("btnSearch").disabled = !(state.dbReady && state.targetFeat);
+  document.getElementById("btnOpt").disabled = !(state.selected && !optRunning && state.objVal < 1e8);
+  document.getElementById("btnPlay").disabled = !state.selected;
+}
+
+resize();
+buildDB();
+</script>
+</body>
+</html>
