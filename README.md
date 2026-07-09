@@ -7,6 +7,7 @@ An unofficial, single-file browser implementation of the interactive design pipe
 
 <!-- スクリーンショット / デモGIFをここに配置 -->
 <!-- ![demo](docs/demo.gif) -->
+**[▶ Live Demo](https://n-nagaya.github.io/mechanical-characters/mechanical_characters.html)**
 
 ## デモ / Demo
 
