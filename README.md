@@ -1,6 +1,8 @@
 # 機械キャラクタの計算論的設計 — ブラウザ実装
 **Computational Design of Mechanical Characters — Interactive Browser Implementation**
 
+**[▶ Live Demo / デモを開く](https://n-nagaya.github.io/mechanical-characters/mechanical_characters.html)** — インストール不要、ブラウザでそのまま動きます / Runs directly in your browser, nothing to install.
+
 Coros らによる SIGGRAPH 2013 論文 *Computational Design of Mechanical Characters* の対話的設計パイプラインを、単一の HTML ファイルとして実装した非公式のブラウザデモです。目標とする閉曲線(モーションカーブ)をスケッチすると、その軌道を最もよく再現するリンク機構をデータベースから検索し、寸法パラメータを連続最適化して、単一のクランクで駆動するアニメーションとして再生します。
 
 An unofficial, single-file browser implementation of the interactive design pipeline from *Computational Design of Mechanical Characters* (Coros et al., SIGGRAPH 2013). Sketch a closed target curve, retrieve the best-matching linkage mechanism from a precomputed database, refine its parameters via continuous optimization, and watch the mechanism trace the curve driven by a single crank.
@@ -8,28 +10,30 @@ An unofficial, single-file browser implementation of the interactive design pipe
 <!-- スクリーンショット / デモGIFをここに配置 -->
 <!-- ![demo](docs/demo.gif) -->
 
-**[▶ Live Demo](https://n-nagaya.github.io/mechanical-characters/mechanical_characters.html)**
-
 ## デモ / Demo
 
-`mechanical_characters.html` をブラウザで開くだけで動作します。外部ライブラリ・ビルド・サーバは不要です。
+**オンライン(推奨)/ Online (recommended):**
+👉 **https://n-nagaya.github.io/mechanical-characters/mechanical_characters.html**
 
-Just open `mechanical_characters.html` in a browser. No external libraries, build steps, or server required.
+**ローカル / Local:**
+リポジトリの `mechanical_characters.html` をダウンロードしてブラウザで開くだけで動作します。外部ライブラリ・ビルド・サーバは不要です。
+Download `mechanical_characters.html` and open it in a browser. No external libraries, build steps, or server required.
 
-- GitHub Pages を有効にすると、そのままオンラインデモとして公開できます。
-- 動作確認: Chrome / Edge / Safari / Firefox の最新版(デスクトップ・タブレット)
+> **Note:** GitHub のファイル一覧で `mechanical_characters.html` をクリックするとソースコードが表示されるだけです。デモは上の Live Demo リンクから開いてください。
+> Clicking the file on GitHub shows the source code only — use the Live Demo link above to run it.
+
+動作確認 / Tested on: Chrome / Edge / Safari / Firefox の最新版(デスクトップ・タブレット)
 
 ## 使い方 / Usage
 
-1. **目標曲線を描く** — 図面キャンバス上にドラッグで閉曲線を描きます。プリセット(楕円・豆型・8の字・おむすび・歩行軌道)も選べます。
-2. **機構を検索** — 事前サンプリング済みデータベースから、曲線特徴量メトリックにより上位3候補の機構を提示します。カードをクリックして候補を切り替えられます。
-3. **パラメータ最適化** — 選択した機構の寸法・取付点・配置を最適化し、マーカー軌跡と目標曲線の二乗誤差を最小化します。
-4. **駆動・確認** — 単一の入力クランクで機構を駆動し、軌跡と目標曲線を重ねて確認します。速度調整と表示切替(目標曲線 / 軌跡 / 歯車)が可能です。
-
-1. **Sketch** a closed target curve on the drafting canvas (or pick a preset).
-2. **Search** the precomputed mechanism database; the top-3 candidates are shown as clickable cards.
-3. **Optimize** the selected mechanism's dimensions, attachment point, and placement to minimize the squared error between the traced curve and the target.
-4. **Play** the mechanism driven by a single input crank, with speed control and display toggles.
+1. **目標曲線を描く / Sketch** — 図面キャンバス上にドラッグで閉曲線を描きます。プリセット(楕円・豆型・8の字・おむすび・歩行軌道)も選べます。
+   Draw a closed target curve on the drafting canvas, or pick a preset.
+2. **機構を検索 / Search** — 事前サンプリング済みデータベースから、曲線特徴量メトリックにより上位3候補の機構を提示します。カードをクリックして候補を切り替えられます。
+   The top-3 candidate mechanisms from the precomputed database are shown as clickable cards.
+3. **パラメータ最適化 / Optimize** — 選択した機構の寸法・取付点・配置を最適化し、マーカー軌跡と目標曲線の二乗誤差を最小化します。
+   The selected mechanism's dimensions, attachment point, and placement are refined to minimize the squared error between the traced curve and the target.
+4. **駆動・確認 / Play** — 単一の入力クランクで機構を駆動し、軌跡と目標曲線を重ねて確認します。速度調整と表示切替(目標曲線 / 軌跡 / 歯車)が可能です。
+   The mechanism is driven by a single input crank, with speed control and display toggles.
 
 ## 実装内容 / What is implemented
 
@@ -80,6 +84,6 @@ This is an **unofficial** implementation. The original work is by Disney Researc
 
 ## ライセンス / License
 
-本リポジトリのコードは MIT License で公開しています。論文の手法・図・本文の著作権は原著者および ACM に帰属します。
+本リポジトリのコードは MIT License で公開しています([LICENSE](LICENSE) を参照)。論文の手法・図・本文の著作権は原著者および ACM に帰属します。
 
-The code in this repository is released under the MIT License. The method, figures, and text of the original paper remain the property of the original authors and ACM.
+The code in this repository is released under the MIT License (see [LICENSE](LICENSE)). The method, figures, and text of the original paper remain the property of the original authors and ACM.
