@@ -138,6 +138,30 @@
   .toggles { display: flex; flex-direction: column; gap: 5px; font-size: 12px; margin-top: 6px; }
   .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
   input[type=range] { width: 100%; accent-color: var(--brass); }
+  /* ---- export panel ---- */
+  .field { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .field label { font-size: 12px; flex: 1; }
+  .field input[type=number] {
+    width: 78px; font-family: "SF Mono", Consolas, monospace; font-size: 12.5px;
+    padding: 5px 7px; border: 1px solid var(--ink-soft); border-radius: 2px;
+    background: var(--ivory); color: var(--ink); text-align: right;
+  }
+  .field .unit { font-size: 11.5px; color: var(--ink-soft); width: 22px; }
+  .fieldnote { font-size: 11px; color: var(--ink-soft); line-height: 1.55; margin-top: 4px; }
+  .dimtbl {
+    width: 100%; border-collapse: collapse; margin-top: 10px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 10.5px;
+  }
+  .dimtbl th {
+    text-align: left; padding: 4px 6px; background: var(--ink); color: var(--brass-bright);
+    font-weight: 600; letter-spacing: .04em;
+  }
+  .dimtbl td { padding: 3px 6px; border-bottom: 1px solid #ddd3bb; vertical-align: top; }
+  .dimtbl td:nth-child(2) { text-align: right; white-space: nowrap; }
+  .dimtbl td.warn {
+    color: #8a3b1c; background: #f7e9df; text-align: left; white-space: normal;
+    font-family: inherit; font-size: 11px; line-height: 1.5;
+  }
   .legend { display:flex; gap:14px; margin-top:8px; font-size:11px; color:var(--ink-soft); flex-wrap: wrap;}
   .legend span::before { content:""; display:inline-block; width:16px; height:3px; margin-right:5px; vertical-align:middle; border-radius:2px;}
   .lg-target::before { background: var(--vermilion); }
@@ -238,6 +262,29 @@
         <span class="lg-link">リンク</span>
       </div>
     </div>
+
+    <div class="step">
+      <div class="step-head"><div class="step-no">05</div><h2>実寸で出力</h2></div>
+      <div class="desc">寸法をミリメートルに換算し、CAD へ渡せる形式で書き出します。出力の座標系は<b>機構ローカル系</b>(原点 = 入力クランクの固定ピボット、x 軸 = 固定節方向、y 上向き)で、図面上の配置は含みません。</div>
+      <div class="field">
+        <label for="sizeMM">機構全体の長辺</label>
+        <input type="number" id="sizeMM" value="200" min="1" max="5000" step="1"><span class="unit">mm</span>
+      </div>
+      <div class="fieldnote">1周期分の機構全体(歯車のピッチ円を含む)の外接矩形の長辺。板材サイズに合わせて指定します。</div>
+      <div class="field">
+        <label for="teethZ">歯車の基準歯数</label>
+        <input type="number" id="teethZ" value="20" min="6" max="200" step="1"><span class="unit">枚</span>
+      </div>
+      <div class="fieldnote">小さい方の歯車の歯数。歯車比から相手の歯数が決まり、軸間距離を満たすようモジュールを逆算します(5節リンクのみ)。</div>
+      <div id="dimTable"></div>
+      <div class="btn-row" style="margin-top:9px;">
+        <button id="btnExpJSON" class="primary" disabled>JSON</button>
+        <button id="btnExpCSV" disabled>寸法 CSV</button>
+        <button id="btnExpTrace" disabled>軌跡 CSV</button>
+        <button id="btnExpDXF" disabled>DXF</button>
+      </div>
+      <div class="status" id="expStatus">機構を選択して最適化すると出力できます。</div>
+    </div>
   </aside>
 </main>
 
@@ -293,6 +340,43 @@ const MECHS = {
         if (frames) frames.push({ pivots: [O2, O4], links: [[O2, A], [A, B], [O4, B], [A, P], [B, P]], joints: [A, B], marker: P, gears: [{ c: O2, r: a * 0.8, phase: th }] });
       }
       return { curve, frames };
+    },
+    // 出力用の寸法記述(局所単位)。fr0 = frames[0](位相 0 の姿勢)
+    describe(p, fr0) {
+      const [a, b, c, d, u, v] = p;
+      const A = fr0.joints[0], B = fr0.joints[1], P = fr0.marker;
+      return {
+        frame: "原点 = 固定ピボット O2(入力クランク軸)、x 軸 = O2 → O4(固定節)、y 上向き",
+        pivots: [
+          { id: "O2", label: "固定ピボット(入力クランク軸)", x: 0, y: 0 },
+          { id: "O4", label: "固定ピボット(揺動節)", x: d, y: 0 }
+        ],
+        joints0: [
+          { id: "A", label: "クランク端(回転対偶)", x: A.x, y: A.y },
+          { id: "B", label: "揺動節端(回転対偶)", x: B.x, y: B.y },
+          { id: "P", label: "マーカー点", x: P.x, y: P.y }
+        ],
+        links: [
+          { id: "L0", label: "固定節(フレーム)", from: "O2", to: "O4", length: d },
+          { id: "L1", label: "入力クランク", from: "O2", to: "A", length: a },
+          { id: "L2", label: "連結節(カプラ)", from: "A", to: "B", length: b },
+          { id: "L3", label: "揺動節(ロッカ)", from: "O4", to: "B", length: c },
+          { id: "L2a", label: "カプラ三角形 A→P", from: "A", to: "P", length: b * Math.hypot(u, v) },
+          { id: "L2b", label: "カプラ三角形 B→P", from: "B", to: "P", length: b * Math.hypot(u - 1, v) }
+        ],
+        marker: { base: "A", axis: "A→B", along: u * b, perp: v * b },
+        driver: { axis: "O2", crankLength: a },
+        gears: [],
+        guide: null,
+        params: [
+          { sym: "a", label: "クランク長", value: a, kind: "len" },
+          { sym: "b", label: "連結節長", value: b, kind: "len" },
+          { sym: "c", label: "揺動節長", value: c, kind: "len" },
+          { sym: "d", label: "固定節長(軸間距離)", value: d, kind: "len" },
+          { sym: "u", label: "マーカー位置(A→B 方向, 連結節長に対する比)", value: u, kind: "num" },
+          { sym: "v", label: "マーカー位置(垂直方向, 連結節長に対する比)", value: v, kind: "num" }
+        ]
+      };
     }
   },
   fivebar: {
@@ -321,6 +405,51 @@ const MECHS = {
         if (frames) frames.push({ pivots: [O1, O2], links: [[O1, A1], [O2, A2], [A1, E], [A2, E], [A1, P], [E, P]], joints: [A1, A2, E], marker: P, gears: [{ c: O1, r: g1, phase: th }, { c: O2, r: g2, phase: th2 }] });
       }
       return { curve, frames };
+    },
+    describe(p, fr0, ratio) {
+      const [a1, a2, l1, l2, d, phi2, u, v] = p; const r = ratio;
+      const A1 = fr0.joints[0], A2 = fr0.joints[1], E = fr0.joints[2], P = fr0.marker;
+      const g1 = d * Math.abs(r) / (1 + Math.abs(r)), g2 = d - g1;
+      return {
+        frame: "原点 = 固定ピボット O1(入力クランク軸)、x 軸 = O1 → O2(軸間)、y 上向き",
+        pivots: [
+          { id: "O1", label: "固定ピボット(入力クランク軸 / 歯車1)", x: 0, y: 0 },
+          { id: "O2", label: "固定ピボット(従動クランク軸 / 歯車2)", x: d, y: 0 }
+        ],
+        joints0: [
+          { id: "A1", label: "クランク1端(回転対偶)", x: A1.x, y: A1.y },
+          { id: "A2", label: "クランク2端(回転対偶)", x: A2.x, y: A2.y },
+          { id: "E", label: "連結点(回転対偶)", x: E.x, y: E.y },
+          { id: "P", label: "マーカー点", x: P.x, y: P.y }
+        ],
+        links: [
+          { id: "L0", label: "固定節(フレーム / 軸間距離)", from: "O1", to: "O2", length: d },
+          { id: "L1", label: "クランク1(入力)", from: "O1", to: "A1", length: a1 },
+          { id: "L2", label: "クランク2(歯車駆動)", from: "O2", to: "A2", length: a2 },
+          { id: "L3", label: "連結節1", from: "A1", to: "E", length: l1 },
+          { id: "L4", label: "連結節2", from: "A2", to: "E", length: l2 },
+          { id: "L3a", label: "カプラ三角形 A1→P", from: "A1", to: "P", length: l1 * Math.hypot(u, v) },
+          { id: "L3b", label: "カプラ三角形 E→P", from: "E", to: "P", length: l1 * Math.hypot(u - 1, v) }
+        ],
+        marker: { base: "A1", axis: "A1→E", along: u * l1, perp: v * l1 },
+        driver: { axis: "O1", crankLength: a1 },
+        gears: [
+          { id: "G1", label: "歯車1(入力軸 O1)", cx: 0, cy: 0, pitchR: g1, omega: 1 },
+          { id: "G2", label: "歯車2(従動軸 O2)", cx: d, cy: 0, pitchR: g2, omega: r }
+        ],
+        guide: null,
+        params: [
+          { sym: "a1", label: "クランク1長", value: a1, kind: "len" },
+          { sym: "a2", label: "クランク2長", value: a2, kind: "len" },
+          { sym: "l1", label: "連結節1長", value: l1, kind: "len" },
+          { sym: "l2", label: "連結節2長", value: l2, kind: "len" },
+          { sym: "d", label: "軸間距離", value: d, kind: "len" },
+          { sym: "r", label: "歯車比 ω2/ω1", value: r, kind: "num" },
+          { sym: "φ2", label: "クランク2の位相オフセット", value: phi2, kind: "angle" },
+          { sym: "u", label: "マーカー位置(A1→E 方向, 比)", value: u, kind: "num" },
+          { sym: "v", label: "マーカー位置(垂直方向, 比)", value: v, kind: "num" }
+        ]
+      };
     }
   },
   slider: {
@@ -343,6 +472,36 @@ const MECHS = {
         if (frames) frames.push({ pivots: [O], links: [[O, A], [A, S], [A, P], [S, P]], joints: [A], marker: P, slider: S, sliderLine: e, gears: [{ c: O, r: a * 0.8, phase: th }] });
       }
       return { curve, frames };
+    },
+    describe(p, fr0) {
+      const [a, b, e, u, v] = p;
+      const A = fr0.joints[0], S = fr0.slider, P = fr0.marker;
+      return {
+        frame: "原点 = 固定ピボット O(入力クランク軸)、x 軸 = スライダ案内方向、y 上向き",
+        pivots: [{ id: "O", label: "固定ピボット(入力クランク軸)", x: 0, y: 0 }],
+        joints0: [
+          { id: "A", label: "クランク端(回転対偶)", x: A.x, y: A.y },
+          { id: "S", label: "スライダ(並進対偶)", x: S.x, y: S.y },
+          { id: "P", label: "マーカー点", x: P.x, y: P.y }
+        ],
+        links: [
+          { id: "L1", label: "入力クランク", from: "O", to: "A", length: a },
+          { id: "L2", label: "連接棒", from: "A", to: "S", length: b },
+          { id: "L2a", label: "連接棒上 A→P", from: "A", to: "P", length: b * Math.hypot(u, v) },
+          { id: "L2b", label: "連接棒上 S→P", from: "S", to: "P", length: b * Math.hypot(u - 1, v) }
+        ],
+        marker: { base: "A", axis: "A→S", along: u * b, perp: v * b },
+        driver: { axis: "O", crankLength: a },
+        gears: [],
+        guide: { offset: e, dir: "x 軸に平行", note: "スライダ案内線。クランク軸 O からの偏心量" },
+        params: [
+          { sym: "a", label: "クランク長", value: a, kind: "len" },
+          { sym: "b", label: "連接棒長", value: b, kind: "len" },
+          { sym: "e", label: "案内線の偏心量", value: e, kind: "len" },
+          { sym: "u", label: "マーカー位置(A→S 方向, 比)", value: u, kind: "num" },
+          { sym: "v", label: "マーカー位置(垂直方向, 比)", value: v, kind: "num" }
+        ]
+      };
     }
   }
 };
@@ -747,6 +906,20 @@ function makeMapper(f, psi, s, tx, ty, mirror) {
   };
 }
 
+// makeMapper の逆写像(world → 機構の局所座標)。出力時に目標曲線を機構座標系へ戻すのに使う
+function makeInverseMapper(f, psi, s, tx, ty, mirror) {
+  const caL = Math.cos(-f.angle), saL = Math.sin(-f.angle);
+  const cp = Math.cos(psi), sp = Math.sin(psi);
+  const cx = f.centroid.x, cy = f.centroid.y, lm = f.lmax;
+  return w => {
+    let x = (w.x - tx) / s, y = (w.y - ty) / s;
+    let rx = x * cp + y * sp, ry = -x * sp + y * cp;   // R(-psi)
+    if (mirror) ry = -ry;
+    rx *= lm; ry *= lm;
+    return { x: cx + rx * caL + ry * saL, y: cy - rx * saL + ry * caL };  // R(+f.angle)
+  };
+}
+
 function objFactory(mech, ratio, mirror) {
   const targetRs = state.targetRs;
   return function (x) {
@@ -1068,7 +1241,9 @@ function render() {
 
 // ---------------- Fit to content (全体表示) ----------------
 // 目標曲線 + 1周期分の全フレーム(リンク・ジョイント・歯車・マーカー)の外接矩形を world 座標で求める
-function contentBounds() {
+// padSymbols=false のときは描画記号の余白を含めない(実寸換算はこちらを使う)
+function contentBounds(padSymbols) {
+  if (padSymbols === undefined) padSymbols = true;
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity, any = false;
   const add = (x, y, r) => {
     if (!isFinite(x) || !isFinite(y)) return;
@@ -1088,13 +1263,14 @@ function contentBounds() {
       if (f) {
         const map = makeMapper(f, x[dim], Math.exp(x[dim + 1]), x[dim + 2], x[dim + 3], mirror);
         const scaleLen = Math.exp(x[dim + 1]) / f.lmax;
-        const showG = document.getElementById("showGears").checked;
+        const showG = !padSymbols || document.getElementById("showGears").checked;
+        const padPivot = padSymbols ? 10 / view.s : 0, padSlider = padSymbols ? 12 / view.s : 0;
         for (const fr of res.frames) {
           for (const [p, q] of fr.links) { const a = map(p), b = map(q); add(a.x, a.y); add(b.x, b.y); }
-          for (const pv of fr.pivots) { const a = map(pv); add(a.x, a.y, 10 / view.s); }
+          for (const pv of fr.pivots) { const a = map(pv); add(a.x, a.y, padPivot); }
           const mp = map(fr.marker); add(mp.x, mp.y);
           if (showG && fr.gears) for (const g of fr.gears) { const c = map(g.c); add(c.x, c.y, g.r * scaleLen); }
-          if (fr.slider) { const a = map(fr.slider); add(a.x, a.y, 12 / view.s); }
+          if (fr.slider) { const a = map(fr.slider); add(a.x, a.y, padSlider); }
         }
       }
     }
@@ -1126,7 +1302,366 @@ function maybeAutoFit() {
   if (out || tiny) fitView();
 }
 
+// ================================================================
+//  Export: 機構パラメータの実寸出力 (JSON / CSV / DXF)
+// ================================================================
+//  出力座標系は「機構ローカル系」= 原点は入力クランクの固定ピボット、
+//  x 軸は固定節方向、y は上向き(CAD 標準)。図面上の配置(回転・平行移動)は
+//  加工に無関係なので出力しない。鏡映が選ばれている場合は y 符号を反転して
+//  画面上の見え方と一致させる。
+function rd(v, n) { const k = Math.pow(10, n === undefined ? 3 : n); return Math.round(v * k) / k; }
+
+function exportSizeMM() {
+  const el = document.getElementById("sizeMM");
+  const v = parseFloat(el && el.value);
+  return isFinite(v) && v > 0 ? v : 200;
+}
+function exportTeeth() {
+  const el = document.getElementById("teethZ");
+  const v = parseInt(el && el.value, 10);
+  return isFinite(v) && v >= 6 ? v : 20;
+}
+
+// 1周期分の全フレームを局所座標で走査した外接矩形(歯車のピッチ円を含む)
+function localMechBounds(frames) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  const add = (x, y, r) => {
+    r = r || 0;
+    if (x - r < minx) minx = x - r; if (x + r > maxx) maxx = x + r;
+    if (y - r < miny) miny = y - r; if (y + r > maxy) maxy = y + r;
+  };
+  for (const fr of frames) {
+    for (const [p, q] of fr.links) { add(p.x, p.y); add(q.x, q.y); }
+    for (const pv of fr.pivots) add(pv.x, pv.y);
+    add(fr.marker.x, fr.marker.y);
+    if (fr.gears) for (const g of fr.gears) add(g.c.x, g.c.y, g.r);
+    if (fr.slider) add(fr.slider.x, fr.slider.y);
+  }
+  return { minx, miny, maxx, maxy, w: maxx - minx, h: maxy - miny };
+}
+
+// 歯車諸元。かみ合い条件 a = (d1+d2)/2 を満たすようにモジュールを決める(論文 §6.1 の制約式)
+function gearSpec(desc, K, zBase) {
+  if (!desc.gears || desc.gears.length < 2) return null;
+  const g1 = desc.gears[0], g2 = desc.gears[1];
+  const a_mm = Math.hypot(g2.cx - g1.cx, g2.cy - g1.cy) * K;
+  const ratio = g2.omega / g1.omega;                 // ω2/ω1
+  const q = Math.abs(ratio);                          // ピッチ円半径比 r1/r2
+  const z2 = zBase, z1 = Math.max(6, Math.round(zBase * q));
+  const m = 2 * a_mm / (z1 + z2);
+  const spec = {
+    standard: "インボリュート平歯車 / 圧力角 20° / 並歯",
+    centerDistance_mm: rd(a_mm),
+    module_mm: rd(m, 6),        // 軸間距離から逆算するため一般に非標準値。桁を落とすと a がずれる
+    pressureAngle_deg: 20,
+    gears: [
+      { id: g1.id, label: g1.label, teeth: z1, pitchDia_mm: rd(m * z1), tipDia_mm: rd(m * (z1 + 2)), rootDia_mm: rd(m * (z1 - 2.5)), omegaRatio: g1.omega },
+      { id: g2.id, label: g2.label, teeth: z2, pitchDia_mm: rd(m * z2), tipDia_mm: rd(m * (z2 + 2)), rootDia_mm: rd(m * (z2 - 2.5)), omegaRatio: g2.omega }
+    ],
+    checks: {
+      meshOK: Math.abs((m * z1 / 2 + m * z2 / 2) - a_mm) < 1e-6,
+      meshNote: "d1/2 + d2/2 = 軸間距離 a を満たすようにモジュールを逆算している",
+      externalPairOK: ratio < 0,
+      directionNote: ratio < 0
+        ? "歯車比が負(逆回転)なので外歯車1組でそのまま成立する"
+        : "⚠ 歯車比が正(同方向回転)。外歯車1組では実現できない。アイドラ(遊び歯車)1枚、または内歯車・ベルトが必要。軸間距離が変わるため機構寸法の再検討が要る",
+      undercut: Math.min(z1, z2) < 17,
+      undercutNote: Math.min(z1, z2) < 17
+        ? "⚠ 歯数が 17 未満のため標準歯形ではアンダーカットが生じる。転位係数を与えるか歯数を増やすこと"
+        : "アンダーカットの心配はない(歯数 17 以上)"
+    }
+  };
+  return spec;
+}
+
+function buildExportModel() {
+  if (!state.selected || !state.optimizedX) return null;
+  const sel = state.selected, mech = sel.mech, entry = sel.entry, mirror = sel.mirror;
+  if (!mech.describe) return null;
+  const x = state.optimizedX, dim = mech.dim, p = x.slice(0, dim);
+  const res = mech.simulate(p, true, entry.ratio);
+  if (!res) return null;
+  const f = curveFeatures(res.curve);
+  if (!f) return null;
+
+  const desc = mech.describe(p, res.frames[0], entry.ratio);
+  const lb = localMechBounds(res.frames);
+  const longSide = Math.max(lb.w, lb.h);
+  if (!(longSide > 1e-9)) return null;
+
+  const sizeMM = exportSizeMM();
+  const K = sizeMM / longSide;                 // 局所単位 → mm
+  const sgn = mirror ? -1 : 1;
+  const L = v => rd(v * K);
+  const PT = q => [rd(q.x * K), rd(sgn * q.y * K)];
+
+  // 目標曲線を機構局所系へ戻す
+  const inv = makeInverseMapper(f, x[dim], Math.exp(x[dim + 1]), x[dim + 2], x[dim + 3], mirror);
+  const targetLocal = state.targetRs ? state.targetRs.map(inv) : null;
+
+  const mmPerWorldPx = K / (Math.exp(x[dim + 1]) / f.lmax);
+  const rmsPx = Math.sqrt(Math.max(state.objVal, 0));
+
+  const model = {
+    meta: {
+      generator: "機械キャラクタの計算論的設計 — ブラウザ実装",
+      paper: "Coros et al., Computational Design of Mechanical Characters, ACM TOG 32(4), 2013 (doi:10.1145/2461912.2461953)",
+      note: "非公式実装による出力。加工前に必ず干渉・強度・公差を各自で確認すること",
+      generatedAt: new Date().toISOString(),
+      units: "mm / deg"
+    },
+    scale: {
+      basis: "1周期分の機構全体(歯車のピッチ円を含む)の外接矩形の長辺",
+      basisSize_mm: rd(sizeMM),
+      overall_mm: { width: rd(lb.w * K), height: rd(lb.h * K) },
+      mmPerLocalUnit: rd(K, 6),
+      mmPerCanvasPx: rd(mmPerWorldPx, 6)
+    },
+    mechanism: {
+      type: Object.keys(MECHS).find(k => MECHS[k] === mech),
+      name: mech.name,
+      gearRatio: entry.ratio !== undefined ? entry.ratio : null,
+      mirrored: mirror
+    },
+    frame: {
+      description: desc.frame,
+      yAxis: "上向き(CAD 標準。画面キャンバスとは y の向きが逆)",
+      mirrorNote: mirror ? "画面表示が鏡映のため、出力は y 座標の符号を反転して見え方と一致させている" : "鏡映なし"
+    },
+    driver: {
+      axis: desc.driver.axis,
+      crankLength_mm: L(desc.driver.crankLength),
+      sense: mirror ? "CW(時計回り)" : "CCW(反時計回り)",
+      cycle_deg: 360,
+      note: "単一の入力クランクを1回転させると、マーカー点が軌跡を1周する"
+    },
+    pivots: desc.pivots.map(v => ({ id: v.id, label: v.label, x_mm: rd(v.x * K), y_mm: rd(sgn * v.y * K), fixed: true })),
+    jointsAtPhase0: desc.joints0.map(v => ({ id: v.id, label: v.label, x_mm: rd(v.x * K), y_mm: rd(sgn * v.y * K) })),
+    links: desc.links.map(v => ({ id: v.id, label: v.label, from: v.from, to: v.to, length_mm: L(v.length) })),
+    marker: {
+      base: desc.marker.base, axis: desc.marker.axis,
+      along_mm: L(desc.marker.along),
+      perp_mm: rd(sgn * desc.marker.perp * K),
+      note: "基準ジョイントから、指定軸方向に along、その左90°方向に perp だけ離れた点"
+    },
+    slideGuide: desc.guide ? { offset_mm: rd(sgn * desc.guide.offset * K), direction: desc.guide.dir, note: desc.guide.note } : null,
+    assembly: (() => {
+      const at = {};
+      for (const v of desc.pivots) at[v.id] = { x: v.x * K, y: sgn * v.y * K, pivot: true };
+      for (const v of desc.joints0) at[v.id] = { x: v.x * K, y: sgn * v.y * K };
+      const arms = desc.links
+        .filter(v => at[v.from] && at[v.from].pivot && at[v.to] && v.to !== "P")
+        .map(v => ({
+          link: v.id, label: v.label, axis: v.from, end: v.to,
+          angle_deg: rd(Math.atan2(at[v.to].y - at[v.from].y, at[v.to].x - at[v.from].x) * 180 / Math.PI, 3)
+        }));
+      return {
+        note: "入力クランク角 0° のときの各アームの取付角。x 軸正方向から反時計回り。出力座標系での値なので、鏡映の有無を気にせずそのまま組める",
+        arms
+      };
+    })(),
+    gears: gearSpec(desc, K, exportTeeth()),
+    gearNote: (desc.gears && desc.gears.length >= 2)
+      ? "歯車比が運動学に効く実歯車。上記諸元で製作できる"
+      : "この機構の画面上のクランク円板は描画上の装飾であり、歯車としての諸元を持たない。入力側の歯車列生成は論文 §6.1 の範囲で本実装では未対応",
+    parameters: desc.params.map(v => {
+      const o = { symbol: v.sym, label: v.label, value: rd(v.value, 6) };
+      if (v.kind === "len" || v.kind === "coordy") o.value_mm = rd(Math.abs(v.value) * K);
+      if (v.kind === "angle") o.value_deg = rd(v.value * 180 / Math.PI, 3);
+      return o;
+    }),
+    trajectory: {
+      count: res.curve.length,
+      note: "マーカー点の軌跡。index は入力クランク角 = 360°×index/count に対応",
+      points_mm: res.curve.map(PT)
+    },
+    target: targetLocal ? {
+      count: targetLocal.length,
+      note: "設計時に描いた目標曲線を機構座標系に戻したもの。index と軌跡の index は位相が対応していない",
+      points_mm: targetLocal.map(PT)
+    } : null,
+    quality: {
+      objective_px2: rd(state.objVal, 3),
+      rms_px: rd(rmsPx, 3),
+      rms_mm: rd(rmsPx * mmPerWorldPx, 3),
+      note: "目標曲線とマーカー軌跡の頂点間二乗誤差(論文 式(2) 相当)の平方根"
+    },
+    localParams: { params: p.map(v => rd(v, 8)), ratio: entry.ratio !== undefined ? entry.ratio : null, mirror }
+  };
+  return model;
+}
+
+// ---------------- Formatters ----------------
+function toCSVDims(m) {
+  const rows = [["区分", "項目", "記号 / ID", "値", "単位", "備考"]];
+  const push = (a, b, c, d, e, f) => rows.push([a, b, c, d, e, f || ""]);
+  push("スケール", "実寸基準(全体の長辺)", "", m.scale.basisSize_mm, "mm", m.scale.basis);
+  push("スケール", "全体寸法 幅", "", m.scale.overall_mm.width, "mm", "");
+  push("スケール", "全体寸法 高さ", "", m.scale.overall_mm.height, "mm", "");
+  push("機構", "種別", m.mechanism.type, m.mechanism.name, "", m.mechanism.gearRatio !== null ? `歯車比 ${m.mechanism.gearRatio}` : "");
+  push("座標系", "定義", "", m.frame.description, "", m.frame.mirrorNote);
+  push("駆動", "入力軸", m.driver.axis, m.driver.crankLength_mm, "mm", `クランク長 / ${m.driver.sense} / 1周 ${m.driver.cycle_deg}°`);
+  for (const v of m.links) push("リンク長", v.label, v.id, v.length_mm, "mm", `${v.from} → ${v.to}`);
+  for (const v of m.pivots) { push("固定ピボット", v.label + " X", v.id, v.x_mm, "mm", ""); push("固定ピボット", v.label + " Y", v.id, v.y_mm, "mm", ""); }
+  for (const v of m.jointsAtPhase0) { push("ジョイント(位相0°)", v.label + " X", v.id, v.x_mm, "mm", ""); push("ジョイント(位相0°)", v.label + " Y", v.id, v.y_mm, "mm", ""); }
+  push("マーカー", "軸方向オフセット", "along", m.marker.along_mm, "mm", `基準 ${m.marker.base} / 軸 ${m.marker.axis}`);
+  push("マーカー", "垂直オフセット", "perp", m.marker.perp_mm, "mm", m.marker.note);
+  if (m.slideGuide) push("スライダ", "案内線の偏心量", "e", m.slideGuide.offset_mm, "mm", m.slideGuide.direction);
+  for (const v of m.assembly.arms) push("組立(位相0°)", v.label + " 取付角", v.link, v.angle_deg, "°", `${v.axis} → ${v.end} / ${m.assembly.note}`);
+  if (m.gears) {
+    push("歯車", "規格", "", m.gears.standard, "", "");
+    push("歯車", "軸間距離", "a", m.gears.centerDistance_mm, "mm", m.gears.checks.meshNote);
+    push("歯車", "モジュール", "m", m.gears.module_mm, "mm", "軸間距離から逆算した値。標準モジュールではない");
+    for (const g of m.gears.gears) {
+      push("歯車", g.label + " 歯数", g.id, g.teeth, "枚", `角速度比 ${g.omegaRatio}`);
+      push("歯車", g.label + " 基準円直径", g.id, g.pitchDia_mm, "mm", "");
+      push("歯車", g.label + " 歯先円直径", g.id, g.tipDia_mm, "mm", "");
+      push("歯車", g.label + " 歯底円直径", g.id, g.rootDia_mm, "mm", "");
+    }
+    push("歯車", "回転方向の成立性", "", m.gears.checks.externalPairOK ? "OK" : "要アイドラ", "", m.gears.checks.directionNote);
+    push("歯車", "アンダーカット", "", m.gears.checks.undercut ? "注意" : "問題なし", "", m.gears.checks.undercutNote);
+  } else {
+    push("歯車", "諸元", "", "なし", "", m.gearNote);
+  }
+  for (const v of m.parameters) push("内部パラメータ", v.label, v.symbol, v.value, v.value_mm !== undefined ? `(${v.value_mm} mm)` : (v.value_deg !== undefined ? `(${v.value_deg}°)` : "—"), "");
+  push("精度", "目的関数 F", "", m.quality.objective_px2, "px²", m.quality.note);
+  push("精度", "RMS 誤差", "", m.quality.rms_mm, "mm", `= ${m.quality.rms_px} px`);
+  return rows.map(r => r.map(c => {
+    const s = String(c);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(",")).join("\r\n");
+}
+
+function toCSVTrace(m) {
+  const n = m.trajectory.count;
+  const rows = [["index", "crank_deg", "marker_x_mm", "marker_y_mm", "target_x_mm", "target_y_mm"]];
+  for (let i = 0; i < n; i++) {
+    const p = m.trajectory.points_mm[i];
+    const t = m.target && m.target.points_mm[i];
+    rows.push([i, rd(360 * i / n, 2), p[0], p[1], t ? t[0] : "", t ? t[1] : ""]);
+  }
+  return rows.map(r => r.join(",")).join("\r\n");
+}
+
+function toDXF(m) {
+  const o = [];
+  const g = (code, val) => { o.push(String(code)); o.push(String(val)); };
+  const layers = [["LINK", 7], ["PIVOT", 3], ["JOINT", 4], ["MARKER", 6], ["TRACE", 2], ["TARGET", 1], ["GEAR", 5]];
+  g(0, "SECTION"); g(2, "HEADER");
+  g(9, "$ACADVER"); g(1, "AC1009");
+  g(9, "$INSUNITS"); g(70, 4);           // 4 = mm
+  g(0, "ENDSEC");
+  g(0, "SECTION"); g(2, "TABLES");
+  g(0, "TABLE"); g(2, "LAYER"); g(70, layers.length);
+  for (const [nm, col] of layers) { g(0, "LAYER"); g(2, nm); g(70, 0); g(62, col); g(6, "CONTINUOUS"); }
+  g(0, "ENDTAB"); g(0, "ENDSEC");
+  g(0, "SECTION"); g(2, "ENTITIES");
+  const line = (layer, a, b) => { g(0, "LINE"); g(8, layer); g(10, a[0]); g(20, a[1]); g(30, 0); g(11, b[0]); g(21, b[1]); g(31, 0); };
+  const circle = (layer, c, r) => { g(0, "CIRCLE"); g(8, layer); g(10, c[0]); g(20, c[1]); g(30, 0); g(40, r); };
+  const poly = (layer, pts, closed) => {
+    g(0, "POLYLINE"); g(8, layer); g(66, 1); g(70, closed ? 1 : 0); g(10, 0); g(20, 0); g(30, 0);
+    for (const p of pts) { g(0, "VERTEX"); g(8, layer); g(10, p[0]); g(20, p[1]); g(30, 0); }
+    g(0, "SEQEND"); g(8, layer);
+  };
+  const at = {};
+  for (const v of m.pivots) at[v.id] = [v.x_mm, v.y_mm];
+  for (const v of m.jointsAtPhase0) at[v.id] = [v.x_mm, v.y_mm];
+  for (const v of m.links) if (at[v.from] && at[v.to]) line("LINK", at[v.from], at[v.to]);
+  for (const v of m.pivots) { circle("PIVOT", at[v.id], 2); line("PIVOT", [at[v.id][0] - 4, at[v.id][1] - 4], [at[v.id][0] + 4, at[v.id][1] - 4]); }
+  for (const v of m.jointsAtPhase0) if (v.id !== "P") circle("JOINT", at[v.id], 1.5);
+  if (at.P) circle("MARKER", at.P, 2.5);
+  if (m.gears) {
+    const gp = m.gears.gears;
+    const cs = m.pivots.map(v => [v.x_mm, v.y_mm]);
+    gp.forEach((gg, i) => { if (cs[i]) circle("GEAR", cs[i], gg.pitchDia_mm / 2); });
+  }
+  poly("TRACE", m.trajectory.points_mm, true);
+  if (m.target) poly("TARGET", m.target.points_mm, true);
+  if (m.slideGuide) {
+    const xs = m.jointsAtPhase0.map(v => v.x_mm).concat(m.pivots.map(v => v.x_mm));
+    const x0 = Math.min.apply(null, xs) - 20, x1 = Math.max.apply(null, xs) + 20;
+    line("LINK", [x0, m.slideGuide.offset_mm], [x1, m.slideGuide.offset_mm]);
+  }
+  g(0, "ENDSEC"); g(0, "EOF");
+  return o.join("\r\n") + "\r\n";
+}
+
+// ---------------- Download ----------------
+function download(name, text, mime, bom) {
+  const parts = bom ? ["﻿", text] : [text];
+  const blob = new Blob(parts, { type: mime || "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+}
+function stamp() {
+  const d = new Date(), z = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}_${z(d.getHours())}${z(d.getMinutes())}`;
+}
+function withModel(fn) {
+  const m = buildExportModel();
+  if (!m) { document.getElementById("expStatus").textContent = "出力できません(機構が未選択、または実行不能)"; return; }
+  fn(m, `mechanism_${m.mechanism.type}_${stamp()}`);
+  document.getElementById("expStatus").textContent = "書き出しました。ブラウザのダウンロード先を確認してください。";
+}
+
+// ---------------- 寸法表 ----------------
+function renderExportPanel() {
+  const box = document.getElementById("dimTable");
+  const st = document.getElementById("expStatus");
+  if (!box) return;
+  const m = buildExportModel();
+  const has = !!m;
+  ["btnExpJSON", "btnExpCSV", "btnExpTrace", "btnExpDXF"].forEach(id => {
+    const b = document.getElementById(id); if (b) b.disabled = !has;
+  });
+  if (!has) { box.innerHTML = ""; if (st) st.textContent = "機構を選択して最適化すると出力できます。"; return; }
+  const r = [];
+  r.push(`<tr><th colspan="2">スケール</th></tr>`);
+  r.push(`<tr><td>全体寸法</td><td>${m.scale.overall_mm.width} × ${m.scale.overall_mm.height} mm</td></tr>`);
+  r.push(`<tr><td>図面 1 px</td><td>${m.scale.mmPerCanvasPx} mm</td></tr>`);
+  r.push(`<tr><td>RMS 誤差</td><td>${m.quality.rms_mm} mm</td></tr>`);
+  r.push(`<tr><th colspan="2">リンク長</th></tr>`);
+  for (const v of m.links) r.push(`<tr><td>${v.label}</td><td>${v.length_mm} mm</td></tr>`);
+  r.push(`<tr><th colspan="2">固定ピボット</th></tr>`);
+  for (const v of m.pivots) r.push(`<tr><td>${v.id}</td><td>(${v.x_mm}, ${v.y_mm}) mm</td></tr>`);
+  r.push(`<tr><th colspan="2">組立角(位相 0°)</th></tr>`);
+  for (const v of m.assembly.arms) r.push(`<tr><td>${v.axis} → ${v.end}</td><td>${v.angle_deg}°</td></tr>`);
+  r.push(`<tr><th colspan="2">マーカー取付</th></tr>`);
+  r.push(`<tr><td>${m.marker.base} から ${m.marker.axis} 方向</td><td>${m.marker.along_mm} mm</td></tr>`);
+  r.push(`<tr><td>同 垂直方向</td><td>${m.marker.perp_mm} mm</td></tr>`);
+  if (m.slideGuide) r.push(`<tr><td>案内線の偏心</td><td>${m.slideGuide.offset_mm} mm</td></tr>`);
+  r.push(`<tr><th colspan="2">歯車</th></tr>`);
+  if (m.gears) {
+    r.push(`<tr><td>モジュール m</td><td>${m.gears.module_mm} mm</td></tr>`);
+    r.push(`<tr><td>軸間距離 a</td><td>${m.gears.centerDistance_mm} mm</td></tr>`);
+    for (const g of m.gears.gears) r.push(`<tr><td>${g.id} 歯数 / 基準円</td><td>z=${g.teeth} / φ${g.pitchDia_mm} mm</td></tr>`);
+    if (!m.gears.checks.externalPairOK) r.push(`<tr><td colspan="2" class="warn">${m.gears.checks.directionNote}</td></tr>`);
+    if (m.gears.checks.undercut) r.push(`<tr><td colspan="2" class="warn">${m.gears.checks.undercutNote}</td></tr>`);
+  } else {
+    r.push(`<tr><td colspan="2" class="warn">${m.gearNote}</td></tr>`);
+  }
+  box.innerHTML = `<table class="dimtbl">${r.join("")}</table>`;
+  if (st) st.textContent = `局所単位 1 = ${m.scale.mmPerLocalUnit} mm`;
+}
+
+["sizeMM", "teethZ"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", renderExportPanel);
+});
+document.getElementById("btnExpJSON").addEventListener("click", () =>
+  withModel((m, base) => download(base + ".json", JSON.stringify(m, null, 2), "application/json")));
+document.getElementById("btnExpCSV").addEventListener("click", () =>
+  withModel((m, base) => download(base + "_dims.csv", toCSVDims(m), "text/csv;charset=utf-8", true)));
+document.getElementById("btnExpTrace").addEventListener("click", () =>
+  withModel((m, base) => download(base + "_trace.csv", toCSVTrace(m), "text/csv;charset=utf-8", true)));
+document.getElementById("btnExpDXF").addEventListener("click", () =>
+  withModel((m, base) => download(base + ".dxf", toDXF(m), "application/dxf")));
+
 function updateButtons() {
+  renderExportPanel();
   document.getElementById("btnSearch").disabled = !(state.dbReady && state.targetFeat);
   document.getElementById("btnOpt").disabled = !(state.selected && !optRunning && state.objVal < 1e8);
   document.getElementById("btnPlay").disabled = !state.selected;
