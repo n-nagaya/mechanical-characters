@@ -67,6 +67,28 @@
     font-size: 12px; background: rgba(15,43,61,.8); padding: 6px 10px;
     border-left: 3px solid var(--brass); max-width: 420px; line-height: 1.6;
   }
+  /* ---- view toolbar (表示操作) ---- */
+  #viewbar {
+    position: absolute; right: 10px; top: 10px;
+    display: flex; align-items: stretch; gap: 0;
+    background: rgba(15,43,61,0.9); border: 1px solid var(--line-pale);
+    font-family: "SF Mono", Consolas, monospace; font-size: 11px;
+  }
+  #viewbar button {
+    font-family: inherit; font-size: 11px; padding: 5px 8px; line-height: 1.2;
+    background: transparent; color: var(--line-pale);
+    border: none; border-left: 1px solid rgba(191,227,242,.35); border-radius: 0;
+    cursor: pointer; white-space: nowrap;
+  }
+  #viewbar button:first-child { border-left: none; }
+  #viewbar button:hover:not(:disabled) { background: rgba(191,227,242,.16); color: var(--ivory); }
+  #viewbar button.on { background: var(--brass); color: #201a06; font-weight: 600; }
+  #vbScale {
+    padding: 5px 8px; color: var(--brass-bright); min-width: 52px; text-align: center;
+    border-left: 1px solid rgba(191,227,242,.35); user-select: none;
+  }
+  canvas#cv.mode-view { cursor: grab; }
+  canvas#cv.panning { cursor: grabbing; }
   /* ---- control rail ---- */
   aside {
     width: 330px; flex-shrink: 0; background: var(--panel); overflow-y: auto;
@@ -144,9 +166,18 @@
   <div id="sheetWrap">
     <div id="sheet">
       <canvas id="cv"></canvas>
-      <div id="hint">目標とする<b>閉曲線</b>をこの図面上にドラッグで描いてください(プリセットも可)。描いた曲線を最もよく再現する機構をデータベースから検索し、パラメータを連続最適化します。</div>
+      <div id="hint">目標とする<b>閉曲線</b>をこの図面上にドラッグで描いてください(プリセットも可)。描いた曲線を最もよく再現する機構をデータベースから検索し、パラメータを連続最適化します。<br><span style="opacity:.8">表示:ホイール / ピンチで拡大縮小、<b>Space</b> または <b>Shift</b> + ドラッグ(中・右ボタンでも可)で移動。</span></div>
+      <div id="viewbar">
+        <button id="btnMode" title="ドラッグの用途を切り替え(表示モード中も描画はできません)">✎ 描画</button>
+        <button id="btnZoomOut" title="縮小 ( − )">−</button>
+        <span id="vbScale">100%</span>
+        <button id="btnZoomIn" title="拡大 ( + )">＋</button>
+        <button id="btnFit" title="全体を表示 ( F )">全体表示</button>
+        <button id="btnResetView" title="等倍・原点に戻す ( 0 )">1:1</button>
+      </div>
       <div id="titleBlock">
         <div class="tb-row"><div class="tb-k">SHEET</div><div class="tb-v">MC-2013 / 設計図</div></div>
+        <div class="tb-row"><div class="tb-k">尺度 SCALE</div><div class="tb-v" id="tbScale">1 : 1 (100%)</div></div>
         <div class="tb-row"><div class="tb-k">機構種別</div><div class="tb-v brass" id="tbMech">—</div></div>
         <div class="tb-row"><div class="tb-k">DB サンプル</div><div class="tb-v" id="tbDb">building…</div></div>
         <div class="tb-row"><div class="tb-k">目的関数 F</div><div class="tb-v" id="tbObj">—</div></div>
@@ -199,6 +230,7 @@
         <label><input type="checkbox" id="showTarget" checked> 目標曲線を表示</label>
         <label><input type="checkbox" id="showTrace" checked> マーカー軌跡を表示</label>
         <label><input type="checkbox" id="showGears" checked> 歯車を表示</label>
+        <label><input type="checkbox" id="autoFit" checked> 結果を自動で全体表示</label>
       </div>
       <div class="legend">
         <span class="lg-target">目標曲線</span>
@@ -449,6 +481,33 @@ const cv = document.getElementById("cv");
 const ctx = cv.getContext("2d");
 let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
 
+// ---------------- View transform (zoom / pan) ----------------
+// 図面座標(world) と 画面座標(screen) の関係:  screen = origin + scale * world
+// 目標曲線・機構の座標は全て world で保持し、描画の直前にのみ変換する。
+const SCALE_MIN = 0.05, SCALE_MAX = 20;
+const view = { s: 1, ox: 0, oy: 0 };
+function clampScale(s) { return Math.min(SCALE_MAX, Math.max(SCALE_MIN, s)); }
+function w2s(p) { return { x: view.ox + view.s * p.x, y: view.oy + view.s * p.y }; }
+function s2w(p) { return { x: (p.x - view.ox) / view.s, y: (p.y - view.oy) / view.s }; }
+function zoomAt(sp, factor) {
+  const wp = s2w(sp);
+  const ns = clampScale(view.s * factor);
+  if (ns === view.s) return;
+  view.s = ns;
+  view.ox = sp.x - ns * wp.x;
+  view.oy = sp.y - ns * wp.y;
+  updateViewUI(); render();
+}
+function resetView() { view.s = 1; view.ox = 0; view.oy = 0; updateViewUI(); render(); }
+function updateViewUI() {
+  const pct = view.s * 100;
+  const txt = (pct >= 100 ? pct.toFixed(0) : pct.toFixed(1)) + "%";
+  const vb = document.getElementById("vbScale");
+  if (vb) vb.textContent = txt;
+  const tb = document.getElementById("tbScale");
+  if (tb) tb.textContent = (view.s >= 1 ? `${view.s.toFixed(2)} : 1` : `1 : ${(1 / view.s).toFixed(2)}`) + ` (${txt})`;
+}
+
 const state = {
   dbReady: false,
   db: [],
@@ -521,31 +580,104 @@ function finishDB() {
   updateButtons();
 }
 
-// ---------------- Target curve input ----------------
-function canvasPos(ev) {
+// ---------------- Target curve input / view navigation ----------------
+function screenPos(ev) {
   const r = cv.getBoundingClientRect();
   return { x: ev.clientX - r.left, y: ev.clientY - r.top };
 }
+function canvasPos(ev) { return s2w(screenPos(ev)); }   // world coords
+
+let viewMode = false;        // true: ドラッグ = 表示移動
+let panning = false, panLast = null, spaceDown = false;
+
+function updateCursor() {
+  cv.classList.toggle("mode-view", viewMode && !panning);
+  cv.classList.toggle("panning", panning);
+}
+
 cv.addEventListener("pointerdown", ev => {
   ev.preventDefault();
   cv.setPointerCapture(ev.pointerId);
+  const wantPan = viewMode || spaceDown || ev.shiftKey || ev.button === 1 || ev.button === 2;
+  if (wantPan) {
+    panning = true;
+    panLast = screenPos(ev);
+    updateCursor();
+    return;
+  }
   state.drawing = true;
   state.drawPts = [canvasPos(ev)];
   stopPlayback();
 });
 cv.addEventListener("pointermove", ev => {
+  if (panning) {
+    const p = screenPos(ev);
+    view.ox += p.x - panLast.x;
+    view.oy += p.y - panLast.y;
+    panLast = p;
+    render();
+    return;
+  }
   if (!state.drawing) return;
   const p = canvasPos(ev);
   const last = state.drawPts[state.drawPts.length - 1];
-  if (Math.hypot(p.x - last.x, p.y - last.y) > 2.5) state.drawPts.push(p);
+  if (Math.hypot(p.x - last.x, p.y - last.y) > 2.5 / view.s) state.drawPts.push(p);
   render();
 });
-cv.addEventListener("pointerup", () => {
+function endPointer() {
+  if (panning) { panning = false; updateCursor(); return; }
   if (!state.drawing) return;
   state.drawing = false;
   if (state.drawPts.length > 12) setTarget(state.drawPts);
   else render();
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("contextmenu", ev => ev.preventDefault());
+
+// ホイール = ズーム(トラックパッドのピンチは ctrlKey 付き wheel として届く)
+cv.addEventListener("wheel", ev => {
+  ev.preventDefault();
+  const k = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? 100 : 1);
+  const d = ev.deltaY * k;
+  const factor = Math.exp(-d * (ev.ctrlKey ? 0.010 : 0.0022));
+  zoomAt(screenPos(ev), factor);
+}, { passive: false });
+
+// キーボードショートカット
+function typingTarget(t) {
+  return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+}
+window.addEventListener("keydown", ev => {
+  if (typingTarget(ev.target)) return;
+  if (ev.code === "Space") {
+    if (!spaceDown) { spaceDown = true; cv.classList.add("mode-view"); }
+    ev.preventDefault(); return;
+  }
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const c = { x: W / 2, y: H / 2 };
+  if (ev.key === "+" || ev.key === ";" || ev.key === "=") { zoomAt(c, 1.25); ev.preventDefault(); }
+  else if (ev.key === "-" || ev.key === "_") { zoomAt(c, 1 / 1.25); ev.preventDefault(); }
+  else if (ev.key === "0") { resetView(); ev.preventDefault(); }
+  else if (ev.key === "f" || ev.key === "F") { fitView(); ev.preventDefault(); }
 });
+window.addEventListener("keyup", ev => {
+  if (ev.code === "Space") { spaceDown = false; updateCursor(); }
+});
+window.addEventListener("blur", () => { spaceDown = false; updateCursor(); });
+
+document.getElementById("btnMode").addEventListener("click", () => {
+  viewMode = !viewMode;
+  const b = document.getElementById("btnMode");
+  b.textContent = viewMode ? "✥ 表示" : "✎ 描画";
+  b.classList.toggle("on", viewMode);
+  b.title = viewMode ? "ドラッグ = 表示の移動。クリックで描画モードに戻る" : "ドラッグ = 曲線の描画。クリックで表示モードに切替";
+  updateCursor();
+});
+document.getElementById("btnZoomIn").addEventListener("click", () => zoomAt({ x: W / 2, y: H / 2 }, 1.25));
+document.getElementById("btnZoomOut").addEventListener("click", () => zoomAt({ x: W / 2, y: H / 2 }, 1 / 1.25));
+document.getElementById("btnFit").addEventListener("click", () => fitView());
+document.getElementById("btnResetView").addEventListener("click", () => resetView());
 
 function setTarget(pts) {
   const rs = resampleClosed(pts, NPHASE);
@@ -579,7 +711,9 @@ const PRESETS = {
 document.querySelectorAll("[data-preset]").forEach(btn => {
   btn.addEventListener("click", () => {
     const fn = PRESETS[btn.dataset.preset];
-    const cx = W * 0.46, cy = H * 0.5, sc = Math.min(W, H) * 0.24;
+    // 現在の表示範囲の中央に、表示サイズ基準で配置する(ズーム中でも画面内に出る)
+    const c = s2w({ x: W * 0.46, y: H * 0.5 });
+    const cx = c.x, cy = c.y, sc = Math.min(W, H) * 0.24 / view.s;
     const pts = [];
     for (let i = 0; i < 120; i++) {
       const t = 2 * Math.PI * i / 120;
@@ -715,6 +849,7 @@ function selectCandidate(i) {
   document.getElementById("optStatus").textContent = `初期目的関数 F = ${best.v < 1e8 ? best.v.toFixed(1) : "∞"}(最適化前)`;
   document.getElementById("optProg").style.width = "0%";
   updateButtons();
+  maybeAutoFit();
   startPlayback();
 }
 
@@ -739,6 +874,7 @@ document.getElementById("btnOpt").addEventListener("click", () => {
       optRunning = false;
       document.getElementById("optStatus").textContent = `最適化完了 — F = ${r.f.toFixed(2)} px²(RMS誤差 ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
       updateButtons();
+      maybeAutoFit();
       startPlayback();
     }
   }
@@ -779,18 +915,22 @@ function stopPlayback() {
 function drawGrid() {
   ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--blueprint");
   ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = "rgba(191,227,242,0.09)";
-  ctx.lineWidth = 1;
-  const g = 28;
-  ctx.beginPath();
-  for (let x = g; x < W; x += g) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-  for (let y = g; y < H; y += g) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(191,227,242,0.18)";
-  ctx.beginPath();
-  for (let x = g * 5; x < W; x += g * 5) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
-  for (let y = g * 5; y < H; y += g * 5) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
-  ctx.stroke();
+  // グリッドはビューに追従。画面上の間隔が読みやすい範囲に入るよう5倍刻みで適応
+  let gw = 28;
+  while (gw * view.s < 14) gw *= 5;
+  while (gw * view.s > 90) gw /= 5;
+  const lines = (spacing, color) => {
+    if (!(spacing > 2) || !isFinite(spacing)) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath();
+    const x0 = view.ox + Math.ceil(-view.ox / spacing) * spacing;
+    for (let x = x0; x < W; x += spacing) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    const y0 = view.oy + Math.ceil(-view.oy / spacing) * spacing;
+    for (let y = y0; y < H; y += spacing) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+  };
+  lines(gw * view.s, "rgba(191,227,242,0.09)");
+  lines(gw * 5 * view.s, "rgba(191,227,242,0.18)");
   // corner registration marks
   ctx.strokeStyle = "rgba(191,227,242,0.5)";
   const m = 14;
@@ -808,7 +948,7 @@ function drawCurve(pts, color, width, dash, closed = true) {
   ctx.strokeStyle = color; ctx.lineWidth = width;
   ctx.setLineDash(dash || []);
   ctx.beginPath();
-  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  pts.forEach((p0, i) => { const p = w2s(p0); i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); });
   if (closed) ctx.closePath();
   ctx.stroke();
   ctx.restore();
@@ -854,7 +994,7 @@ function render() {
     drawCurve(state.targetRs, "#e4572e", 2.4, []);
     ctx.fillStyle = "#e4572e";
     ctx.font = "11px 'SF Mono', Consolas, monospace";
-    const p0 = state.targetRs[0];
+    const p0 = w2s(state.targetRs[0]);
     ctx.fillText("target", p0.x + 8, p0.y - 8);
   }
 
@@ -868,6 +1008,7 @@ function render() {
       const f = curveFeatures(res.curve);
       if (f) {
         const map = makeMapper(f, x[dim], Math.exp(x[dim + 1]), x[dim + 2], x[dim + 3], mirror);
+        const S = p => w2s(map(p));   // world(図面) → screen
         const worldCurve = res.curve.map(map);
         if (showTr) drawCurve(worldCurve, "rgba(232,199,74,0.9)", 1.8, [2, 3]);
         const fi = Math.floor(state.phase * NPHASE) % NPHASE;
@@ -875,23 +1016,23 @@ function render() {
         const scaleLen = Math.exp(x[dim + 1]) / f.lmax;
         // slider guide line
         if (fr.slider) {
-          const a = map({ x: -6, y: fr.sliderLine }), b = map({ x: 10, y: fr.sliderLine });
+          const a = S({ x: -6, y: fr.sliderLine }), b = S({ x: 10, y: fr.sliderLine });
           ctx.save(); ctx.strokeStyle = "rgba(237,230,214,0.35)"; ctx.setLineDash([8, 6]); ctx.lineWidth = 1.2;
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.restore();
         }
         // gears
-        if (showG) for (const g of fr.gears) drawGear(map(g.c), g.r * scaleLen, g.phase, mirror);
+        if (showG) for (const g of fr.gears) drawGear(S(g.c), g.r * scaleLen * view.s, g.phase, mirror);
         // links
         ctx.save();
         ctx.strokeStyle = "#ede6d6"; ctx.lineWidth = 3.4; ctx.lineCap = "round";
         for (const [p, q] of fr.links) {
-          const a = map(p), b = map(q);
+          const a = S(p), b = S(q);
           ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
         }
         ctx.restore();
         // pivots (ground)
         for (const pv of fr.pivots) {
-          const a = map(pv);
+          const a = S(pv);
           ctx.beginPath(); ctx.arc(a.x, a.y, 5, 0, 2 * Math.PI);
           ctx.fillStyle = "#0f2b3d"; ctx.fill();
           ctx.strokeStyle = "#ede6d6"; ctx.lineWidth = 2; ctx.stroke();
@@ -901,13 +1042,13 @@ function render() {
         }
         // joints
         for (const j of fr.joints) {
-          const a = map(j);
+          const a = S(j);
           ctx.beginPath(); ctx.arc(a.x, a.y, 3.4, 0, 2 * Math.PI);
           ctx.fillStyle = "#ede6d6"; ctx.fill();
         }
         // slider block
         if (fr.slider) {
-          const a = map(fr.slider);
+          const a = S(fr.slider);
           ctx.save(); ctx.translate(a.x, a.y);
           ctx.fillStyle = "#ede6d6";
           ctx.fillRect(-9, -6, 18, 12);
@@ -915,7 +1056,7 @@ function render() {
           ctx.restore();
         }
         // marker point
-        const mp = map(fr.marker);
+        const mp = S(fr.marker);
         ctx.beginPath(); ctx.arc(mp.x, mp.y, 5.5, 0, 2 * Math.PI);
         ctx.fillStyle = "#e8c74a"; ctx.fill();
         ctx.strokeStyle = "#0f2b3d"; ctx.lineWidth = 1.6; ctx.stroke();
@@ -925,12 +1066,74 @@ function render() {
   }
 }
 
+// ---------------- Fit to content (全体表示) ----------------
+// 目標曲線 + 1周期分の全フレーム(リンク・ジョイント・歯車・マーカー)の外接矩形を world 座標で求める
+function contentBounds() {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity, any = false;
+  const add = (x, y, r) => {
+    if (!isFinite(x) || !isFinite(y)) return;
+    r = r || 0; any = true;
+    if (x - r < minx) minx = x - r; if (x + r > maxx) maxx = x + r;
+    if (y - r < miny) miny = y - r; if (y + r > maxy) maxy = y + r;
+  };
+  if (state.targetRs) for (const p of state.targetRs) add(p.x, p.y);
+  else if (state.drawPts.length) for (const p of state.drawPts) add(p.x, p.y);
+
+  if (state.selected && state.optimizedX) {
+    const { mech, entry, mirror } = state.selected;
+    const x = state.optimizedX, dim = mech.dim;
+    const res = mech.simulate(x.slice(0, dim), true, entry.ratio);
+    if (res) {
+      const f = curveFeatures(res.curve);
+      if (f) {
+        const map = makeMapper(f, x[dim], Math.exp(x[dim + 1]), x[dim + 2], x[dim + 3], mirror);
+        const scaleLen = Math.exp(x[dim + 1]) / f.lmax;
+        const showG = document.getElementById("showGears").checked;
+        for (const fr of res.frames) {
+          for (const [p, q] of fr.links) { const a = map(p), b = map(q); add(a.x, a.y); add(b.x, b.y); }
+          for (const pv of fr.pivots) { const a = map(pv); add(a.x, a.y, 10 / view.s); }
+          const mp = map(fr.marker); add(mp.x, mp.y);
+          if (showG && fr.gears) for (const g of fr.gears) { const c = map(g.c); add(c.x, c.y, g.r * scaleLen); }
+          if (fr.slider) { const a = map(fr.slider); add(a.x, a.y, 12 / view.s); }
+        }
+      }
+    }
+  }
+  return any ? { minx, miny, maxx, maxy } : null;
+}
+
+function fitView() {
+  const b = contentBounds();
+  if (!b) { resetView(); return; }
+  const pad = 40;
+  const bw = Math.max(b.maxx - b.minx, 1e-6), bh = Math.max(b.maxy - b.miny, 1e-6);
+  const s = clampScale(Math.min((W - 2 * pad) / bw, (H - 2 * pad) / bh));
+  view.s = s;
+  view.ox = W / 2 - s * (b.minx + b.maxx) / 2;
+  view.oy = H / 2 - s * (b.miny + b.maxy) / 2;
+  updateViewUI(); render();
+}
+
+// 画面外にはみ出している(または極端に小さい)ときだけ自動フィット
+function maybeAutoFit() {
+  const el = document.getElementById("autoFit");
+  if (!el || !el.checked) return;
+  const b = contentBounds();
+  if (!b) return;
+  const p1 = w2s({ x: b.minx, y: b.miny }), p2 = w2s({ x: b.maxx, y: b.maxy });
+  const out = p1.x < 4 || p1.y < 4 || p2.x > W - 4 || p2.y > H - 4;
+  const tiny = (p2.x - p1.x) < W * 0.18 && (p2.y - p1.y) < H * 0.18;
+  if (out || tiny) fitView();
+}
+
 function updateButtons() {
   document.getElementById("btnSearch").disabled = !(state.dbReady && state.targetFeat);
   document.getElementById("btnOpt").disabled = !(state.selected && !optRunning && state.objVal < 1e8);
   document.getElementById("btnPlay").disabled = !state.selected;
 }
 
+updateViewUI();
+updateCursor();
 resize();
 buildDB();
 </script>
