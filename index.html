@@ -503,6 +503,139 @@ const MECHS = {
         ]
       };
     }
+  },
+  // Stephenson 型6節リンク。4節ループ(O2-A-B-O4)の連結節上の点 C を、
+  // 第2のダイアド(C-D-O6)で拘束する。2段のダイアド解法で閉形式のまま解ける。
+  // 連結節 ABC と固定節 O2-O4-O6 がともに三元節で、互いに直接つながらないので Stephenson 型。
+  sixbar: {
+    name: "6節リンク機構(Stephenson型)", dim: 12,
+    randomParams(r) {
+      // 12個を独立に振ると第2ループがほとんど成立しないため、
+      // 先に第1ループ(4節)を解いて C の軌跡を求め、そこから e, f を逆算する。
+      const B_ = this.bounds;
+      for (let tries = 0; tries < 16; tries++) {
+        const a = 0.5 + r() * 1.0, b = 1.0 + r() * 2.5, c = 1.0 + r() * 2.5, d = 1.4 + r() * 2.2;
+        const px = -0.4 + r() * 1.8, py = -1.4 + r() * 2.8;
+        const loop1 = MECHS.fourbar.simulate([a, b, c, d, px, py], false);
+        if (!loop1) continue;
+        const Cs = loop1.curve;                        // = 連結節上の点 C の軌跡
+        let cx = 0, cy = 0;
+        for (const q of Cs) { cx += q.x; cy += q.y; }
+        cx /= Cs.length; cy /= Cs.length;
+        const ang = r() * 2 * Math.PI, rr = 0.6 + r() * 2.6;
+        const gx = cx + rr * Math.cos(ang), gy = cy + rr * Math.sin(ang);
+        let dmin = Infinity, dmax = 0;
+        for (const q of Cs) {
+          const dd = Math.hypot(q.x - gx, q.y - gy);
+          if (dd < dmin) dmin = dd; if (dd > dmax) dmax = dd;
+        }
+        // |C - O6| は常に [dmin, dmax]。これが [|e-f|, e+f] に収まれば第2ループは必ず解ける
+        const sum = dmax + 0.05 + r() * 0.4;
+        const diff = r() * Math.min(dmin * 0.9, sum * 0.9);
+        const e = (sum + diff) / 2, f = (sum - diff) / 2;
+        const u = -0.3 + r() * 1.6, v = -1.2 + r() * 2.4;
+        const out = [a, b, c, d, px, py, gx, gy, e, f, u, v];
+        let inRange = true;
+        for (let i = 0; i < out.length; i++) if (out[i] < B_[i][0] || out[i] > B_[i][1]) { inRange = false; break; }
+        if (inRange) return out;
+      }
+      return [1.0, 2.0, 2.0, 2.5, 0.5, 0.6, 1.2, 1.6, 2.0, 2.0, 0.5, 0.4];
+    },
+    bounds: [[0.25, 2.2], [0.6, 4.5], [0.6, 4.5], [0.8, 4.5], [-1.0, 2.2], [-2.2, 2.2],
+    [-4.0, 7.0], [-5.0, 5.0], [0.3, 6.0], [0.3, 6.0], [-0.5, 2.0], [-2.2, 2.2]],
+    simulate(p, withFrames) {
+      const [a, b, c, d, px, py, gx, gy, e, f, u, v] = p;
+      const O2 = { x: 0, y: 0 }, O4 = { x: d, y: 0 }, O6 = { x: gx, y: gy };
+      const curve = [], frames = withFrames ? [] : null;
+      let prevB = null, prevD = null, sB = 1, sD = 1;
+      for (let i = 0; i < NPHASE; i++) {
+        const th = 2 * Math.PI * i / NPHASE;
+        const A = { x: a * Math.cos(th), y: a * Math.sin(th) };
+        // 第1ループ: 4節
+        let B = circleInt(A, b, O4, c, sB);
+        if (i === 0) { if (!B) { sB = -1; B = circleInt(A, b, O4, c, sB); } }
+        else if (B && prevB) {
+          const B2 = circleInt(A, b, O4, c, -sB);
+          if (B2 && Math.hypot(B2.x - prevB.x, B2.y - prevB.y) < Math.hypot(B.x - prevB.x, B.y - prevB.y)) return null;
+        }
+        if (!B) return null;
+        if (prevB && Math.hypot(B.x - prevB.x, B.y - prevB.y) > 0.9 * (a + b)) return null;
+        prevB = B;
+        const ex = B.x - A.x, ey = B.y - A.y;
+        const C = { x: A.x + px * ex - py * ey, y: A.y + px * ey + py * ex };
+        // 第2ループ: C を入力とするダイアド
+        let D = circleInt(C, e, O6, f, sD);
+        if (i === 0) { if (!D) { sD = -1; D = circleInt(C, e, O6, f, sD); } }
+        else if (D && prevD) {
+          const D2 = circleInt(C, e, O6, f, -sD);
+          if (D2 && Math.hypot(D2.x - prevD.x, D2.y - prevD.y) < Math.hypot(D.x - prevD.x, D.y - prevD.y)) return null;
+        }
+        if (!D) return null;
+        if (prevD && Math.hypot(D.x - prevD.x, D.y - prevD.y) > 0.9 * (e + f)) return null;
+        prevD = D;
+        const fx = D.x - C.x, fy = D.y - C.y;
+        const P = { x: C.x + u * fx - v * fy, y: C.y + u * fy + v * fx };
+        curve.push(P);
+        if (frames) frames.push({
+          pivots: [O2, O4, O6],
+          links: [[O2, A], [A, B], [O4, B], [A, C], [B, C], [C, D], [O6, D], [C, P], [D, P]],
+          joints: [A, B, C, D], marker: P,
+          gears: [{ c: O2, r: a * 0.8, phase: th }]
+        });
+      }
+      return { curve, frames };
+    },
+    describe(p, fr0) {
+      const [a, b, c, d, px, py, gx, gy, e, f, u, v] = p;
+      const A = fr0.joints[0], B = fr0.joints[1], C = fr0.joints[2], D = fr0.joints[3], P = fr0.marker;
+      return {
+        frame: "原点 = 固定ピボット O2(入力クランク軸)、x 軸 = O2 → O4、y 上向き。固定節は O2・O4・O6 の三元節",
+        pivots: [
+          { id: "O2", label: "固定ピボット(入力クランク軸)", x: 0, y: 0 },
+          { id: "O4", label: "固定ピボット(揺動節)", x: d, y: 0 },
+          { id: "O6", label: "固定ピボット(第2ダイアド)", x: gx, y: gy }
+        ],
+        joints0: [
+          { id: "A", label: "クランク端(回転対偶)", x: A.x, y: A.y },
+          { id: "B", label: "揺動節端(回転対偶)", x: B.x, y: B.y },
+          { id: "C", label: "連結節の第3点(第2ループへの入力)", x: C.x, y: C.y },
+          { id: "D", label: "第2ダイアドの中間節点", x: D.x, y: D.y },
+          { id: "P", label: "マーカー点", x: P.x, y: P.y }
+        ],
+        links: [
+          { id: "L0", label: "固定節 O2→O4", from: "O2", to: "O4", length: d },
+          { id: "L0b", label: "固定節 O2→O6", from: "O2", to: "O6", length: Math.hypot(gx, gy) },
+          { id: "L0c", label: "固定節 O4→O6", from: "O4", to: "O6", length: Math.hypot(gx - d, gy) },
+          { id: "L1", label: "入力クランク", from: "O2", to: "A", length: a },
+          { id: "L2", label: "連結節(三元節) A→B", from: "A", to: "B", length: b },
+          { id: "L2a", label: "連結節(三元節) A→C", from: "A", to: "C", length: b * Math.hypot(px, py) },
+          { id: "L2b", label: "連結節(三元節) B→C", from: "B", to: "C", length: b * Math.hypot(px - 1, py) },
+          { id: "L3", label: "揺動節(ロッカ)", from: "O4", to: "B", length: c },
+          { id: "L4", label: "第2連結節 C→D", from: "C", to: "D", length: e },
+          { id: "L5", label: "第2揺動節 O6→D", from: "O6", to: "D", length: f },
+          { id: "L4a", label: "出力節(三元節) C→P", from: "C", to: "P", length: e * Math.hypot(u, v) },
+          { id: "L4b", label: "出力節(三元節) D→P", from: "D", to: "P", length: e * Math.hypot(u - 1, v) }
+        ],
+        marker: { base: "C", axis: "C→D", along: u * e, perp: v * e },
+        driver: { axis: "O2", crankLength: a },
+        gears: [],
+        guide: null,
+        params: [
+          { sym: "a", label: "クランク長", value: a, kind: "len" },
+          { sym: "b", label: "連結節長 A→B", value: b, kind: "len" },
+          { sym: "c", label: "揺動節長", value: c, kind: "len" },
+          { sym: "d", label: "固定節長 O2→O4", value: d, kind: "len" },
+          { sym: "px", label: "点C位置(A→B 方向, 比)", value: px, kind: "num" },
+          { sym: "py", label: "点C位置(垂直方向, 比)", value: py, kind: "num" },
+          { sym: "gx", label: "O6 の x 座標", value: gx, kind: "len" },
+          { sym: "gy", label: "O6 の y 座標", value: gy, kind: "coordy" },
+          { sym: "e", label: "第2連結節長 C→D", value: e, kind: "len" },
+          { sym: "f", label: "第2揺動節長 O6→D", value: f, kind: "len" },
+          { sym: "u", label: "マーカー位置(C→D 方向, 比)", value: u, kind: "num" },
+          { sym: "v", label: "マーカー位置(垂直方向, 比)", value: v, kind: "num" }
+        ]
+      };
+    }
   }
 };
 
@@ -699,7 +832,8 @@ let seed = 987654321;
 function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
 
 const DB_TARGET_PER_TYPE = 260;
-const dbCounts = { fourbar: 0, fivebar: 0, slider: 0 };
+const dbCounts = {};
+for (const k of Object.keys(MECHS)) dbCounts[k] = 0;
 function buildDB() {
   const keys = Object.keys(MECHS);
   let ki = 0, attempts = 0;
@@ -734,7 +868,8 @@ function finishDB() {
   state.dbReady = true;
   const total = state.db.length;
   document.getElementById("dbProg").style.width = "100%";
-  document.getElementById("dbStatus").textContent = `構築完了:${total} サンプル(4節 ${dbCounts.fourbar} / 5節 ${dbCounts.fivebar} / スライダ ${dbCounts.slider})`;
+  const brk = Object.keys(dbCounts).map(k => `${MECHS[k].name.replace(/機構.*$/, "")} ${dbCounts[k]}`).join(" / ");
+  document.getElementById("dbStatus").textContent = `構築完了:${total} サンプル(${brk})`;
   document.getElementById("tbDb").textContent = `${total} curves`;
   updateButtons();
 }
@@ -970,8 +1105,15 @@ document.getElementById("btnSearch").addEventListener("click", () => {
     picked.push(s);
   }
   state.candidates = picked;
+  // 曲線メトリックの順位と実際の目的関数は必ずしも一致しないため、
+  // 提示は metric 順のまま、自動選択だけは初期 F が最良の候補にする
+  for (const s of picked) s.init = candidateInit(s).v;
   renderCandidates();
-  if (picked.length) selectCandidate(0);
+  if (picked.length) {
+    let bi = 0;
+    for (let i = 1; i < picked.length; i++) if (picked[i].init < picked[bi].init) bi = i;
+    selectCandidate(bi);
+  }
 });
 
 function renderCandidates() {
@@ -992,28 +1134,36 @@ function renderCandidates() {
     const meta = document.createElement("div");
     meta.className = "meta";
     const score = (s.fd + 3 * s.dp);
-    meta.innerHTML = `<b>候補 ${i + 1}:${MECHS[s.e.mech].name}</b>${s.e.ratio !== undefined ? `(歯車比 ${s.e.ratio}:1)` : ""}<br><span class="score">metric d = ${score.toFixed(4)}</span>`;
+    const initTxt = s.init === undefined ? "" : (s.init < 1e8 ? ` / 初期 F = ${s.init.toFixed(0)}` : " / 実行不能");
+    meta.innerHTML = `<b>候補 ${i + 1}:${MECHS[s.e.mech].name}</b>${s.e.ratio !== undefined ? `(歯車比 ${s.e.ratio}:1)` : ""}<br><span class="score">metric d = ${score.toFixed(4)}${initTxt}</span>`;
     div.appendChild(mini); div.appendChild(meta);
     div.addEventListener("click", () => selectCandidate(i));
     box.appendChild(div);
   });
 }
 
-function selectCandidate(i) {
-  document.querySelectorAll(".cand").forEach((el, k) => el.classList.toggle("sel", k === i));
-  const s = state.candidates[i];
+// 候補の初期値を評価する。鏡映対称の曲線に対応するため
+// 回転 {0, π} × 鏡映 {あり, なし} の4通りを試して最良を返す(副作用なし)
+function candidateInit(s) {
   const mech = MECHS[s.e.mech];
-  const tf = state.targetFeat, bf = s.e.f;
-  // choose best rotation/mirror init
+  const tf = state.targetFeat;
   let best = null;
   for (const mirror of [false, true]) {
     for (const dpsi of [0, Math.PI]) {
       const x0 = s.e.params.concat([tf.angle + dpsi, Math.log(tf.lmax), tf.centroid.x, tf.centroid.y]);
       const obj = objFactory(mech, s.e.ratio, mirror);
       const v = obj(x0);
-      if (!best || v < best.v) best = { x0, v, mirror, obj };
+      if (!best || v < best.v) best = { x0, v, mirror, obj, mech };
     }
   }
+  return best;
+}
+
+function selectCandidate(i) {
+  document.querySelectorAll(".cand").forEach((el, k) => el.classList.toggle("sel", k === i));
+  const s = state.candidates[i];
+  const best = candidateInit(s);
+  const mech = best.mech;
   state.selected = { entry: s.e, mech, mirror: best.mirror, obj: best.obj, x: best.x0 };
   state.optimizedX = best.x0.slice();
   state.objVal = best.v;
@@ -1032,7 +1182,9 @@ document.getElementById("btnOpt").addEventListener("click", () => {
   if (!state.selected || optRunning) return;
   optRunning = true;
   updateButtons();
-  const MAXIT = 450;
+  // 変数が増えると Nelder-Mead の収束が遅くなるため、高次元の機構だけ反復数を増やす
+  // (6節リンクは機構12 + 配置4 = 16次元。既存3機構の挙動は変えない)
+  const MAXIT = state.selected.mech.dim >= 10 ? 900 : 450;
   const nm = makeNelderMead(state.selected.obj, state.selected.x, MAXIT);
   function step() {
     const r = nm.step(20);
