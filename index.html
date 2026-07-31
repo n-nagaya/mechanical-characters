@@ -135,6 +135,7 @@
   .cand .meta { font-size: 11.5px; line-height: 1.55; }
   .cand .meta b { font-size: 12.5px; }
   .cand .score { font-family: "SF Mono", Consolas, monospace; font-size: 10px; color: var(--ink-soft); }
+  .cand .score.fin { color: #8a6d1c; font-weight: 600; }
   .toggles { display: flex; flex-direction: column; gap: 5px; font-size: 12px; margin-top: 6px; }
   .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; }
   input[type=range] { width: 100%; accent-color: var(--brass); }
@@ -235,7 +236,7 @@
 
     <div class="step">
       <div class="step-head"><div class="step-no">03</div><h2>パラメータ最適化</h2></div>
-      <div class="desc">選択した機構の寸法・取付点・配置を Nelder–Mead 法で連続最適化し、マーカー点の軌跡と目標曲線の二乗誤差(論文 式(2) 相当)を最小化します。</div>
+      <div class="desc">機構の寸法・取付点・配置を Nelder–Mead 法で連続最適化し、マーカー点の軌跡と目標曲線の二乗誤差(論文 式(2) 相当)を最小化します。<b>提示中の候補すべてを最適化して最良を採用</b>します(カードをクリックして選んだ場合は、その候補だけを最適化)。</div>
       <button id="btnOpt" class="brassbtn" disabled>最適化を実行</button>
       <div class="progress"><div id="optProg"></div></div>
       <div class="status" id="optStatus">—</div>
@@ -812,6 +813,8 @@ const state = {
   selected: null,      // {entry, mirror, x (param vector incl. transform)}
   optimizedX: null,
   playing: false,
+  selectedIndex: 0,
+  userPicked: false,   // ユーザが候補カードを明示的に選んだか
   phase: 0,
   speed: 1,
   objVal: null
@@ -1090,30 +1093,57 @@ function objFactory(mech, ratio, mirror) {
 }
 
 // ---------------- Search ----------------
+// 候補生成のパラメータ。§5-D の測定で決めた値
+const SHORTLIST_PER_TYPE = 20;   // 機構タイプごとに特徴量距離で絞る件数
+const POOL_PER_TYPE = 2;         // タイプごとに試行にかける候補数
+const SHOW_CANDIDATES = 4;       // カードとして提示する件数
+const PREOPT_ITERS = 60;         // 各候補の試行最適化の反復数
+
+// 曲線メトリックの順位は「実際にどれだけ当てはまるか」を予測しきれない。
+// そこで候補を機構タイプごとに拾い、それぞれ短い試行最適化にかけてから、
+// その結果順に並べ替えて提示する(§5-D の測定に基づく)。
+let searching = false;
 document.getElementById("btnSearch").addEventListener("click", () => {
-  if (!state.dbReady || !state.targetFeat) return;
+  if (!state.dbReady || !state.targetFeat || searching) return;
   const tf = state.targetFeat;
-  const scored = state.db.map(e => ({ e, fd: featDist(tf.feat, e.f.feat) }))
-    .sort((a, b) => a.fd - b.fd).slice(0, 40);
-  for (const s of scored) s.dp = dPos(tf.norm, s.e.f.norm);
-  scored.sort((a, b) => (a.fd + 3 * a.dp) - (b.fd + 3 * b.dp));
-  // diversify: at most 2 per mech type in top-3 display
-  const picked = [];
-  for (const s of scored) {
-    if (picked.length >= 3) break;
-    if (picked.filter(p => p.e.mech === s.e.mech).length >= 2) continue;
-    picked.push(s);
+  const all = state.db.map(e => ({ e, fd: featDist(tf.feat, e.f.feat) }));
+  const pool = [];
+  for (const ty of Object.keys(MECHS)) {
+    const sc = all.filter(s => s.e.mech === ty).sort((a, b) => a.fd - b.fd).slice(0, SHORTLIST_PER_TYPE);
+    for (const s of sc) s.dp = dPos(tf.norm, s.e.f.norm);
+    sc.sort((a, b) => (a.fd + 3 * a.dp) - (b.fd + 3 * b.dp));
+    pool.push(...sc.slice(0, POOL_PER_TYPE));
   }
-  state.candidates = picked;
-  // 曲線メトリックの順位と実際の目的関数は必ずしも一致しないため、
-  // 提示は metric 順のまま、自動選択だけは初期 F が最良の候補にする
-  for (const s of picked) s.init = candidateInit(s).v;
-  renderCandidates();
-  if (picked.length) {
-    let bi = 0;
-    for (let i = 1; i < picked.length; i++) if (picked[i].init < picked[bi].init) bi = i;
-    selectCandidate(bi);
-  }
+  // 試行最適化はフレーム分割して UI を止めない
+  searching = true;
+  state.candidates = [];
+  document.getElementById("cands").innerHTML = "";
+  updateButtons();
+  let i = 0;
+  const stepOne = () => {
+    const t0 = performance.now();
+    while (i < pool.length && performance.now() - t0 < 14) {
+      const s = pool[i++];
+      const b = candidateInit(s);
+      s.init = b.v;
+      if (b.v > 1e8) { s.pre = Infinity; continue; }
+      const nm = makeNelderMead(b.obj, b.x0, PREOPT_ITERS);
+      let r; do { r = nm.step(PREOPT_ITERS); } while (!r.done);
+      s.pre = r.f;
+    }
+    document.getElementById("dbStatus").textContent = `候補を試行中… ${Math.min(i, pool.length)} / ${pool.length}`;
+    if (i < pool.length) { requestAnimationFrame(stepOne); return; }
+    pool.sort((a, b) => a.pre - b.pre);
+    state.candidates = pool.slice(0, SHOW_CANDIDATES);
+    state.userPicked = false;      // カードを触るまでは「まとめて最適化」の対象
+    searching = false;
+    document.getElementById("dbStatus").textContent =
+      `${pool.length} 候補を試行し、上位 ${state.candidates.length} 件を提示(構築済み ${state.db.length} サンプル)`;
+    renderCandidates();
+    if (state.candidates.length) selectCandidate(0);
+    else updateButtons();
+  };
+  requestAnimationFrame(stepOne);
 });
 
 function renderCandidates() {
@@ -1134,10 +1164,11 @@ function renderCandidates() {
     const meta = document.createElement("div");
     meta.className = "meta";
     const score = (s.fd + 3 * s.dp);
-    const initTxt = s.init === undefined ? "" : (s.init < 1e8 ? ` / 初期 F = ${s.init.toFixed(0)}` : " / 実行不能");
-    meta.innerHTML = `<b>候補 ${i + 1}:${MECHS[s.e.mech].name}</b>${s.e.ratio !== undefined ? `(歯車比 ${s.e.ratio}:1)` : ""}<br><span class="score">metric d = ${score.toFixed(4)}${initTxt}</span>`;
+    const preTxt = s.pre === undefined ? "" : (isFinite(s.pre) ? ` / 試行 F = ${s.pre.toFixed(0)}` : " / 実行不能");
+    const finTxt = s.final === undefined ? "" : `<br><span class="score fin">最適化後 F = ${s.final.toFixed(1)}</span>`;
+    meta.innerHTML = `<b>候補 ${i + 1}:${MECHS[s.e.mech].name}</b>${s.e.ratio !== undefined ? `(歯車比 ${s.e.ratio}:1)` : ""}<br><span class="score">metric d = ${score.toFixed(4)}${preTxt}</span>${finTxt}`;
     div.appendChild(mini); div.appendChild(meta);
-    div.addEventListener("click", () => selectCandidate(i));
+    div.addEventListener("click", () => { state.userPicked = true; selectCandidate(i); });
     box.appendChild(div);
   });
 }
@@ -1162,6 +1193,7 @@ function candidateInit(s) {
 function selectCandidate(i) {
   document.querySelectorAll(".cand").forEach((el, k) => el.classList.toggle("sel", k === i));
   const s = state.candidates[i];
+  state.selectedIndex = i;
   const best = candidateInit(s);
   const mech = best.mech;
   state.selected = { entry: s.e, mech, mirror: best.mirror, obj: best.obj, x: best.x0 };
@@ -1177,31 +1209,76 @@ function selectCandidate(i) {
 }
 
 // ---------------- Optimization (chunked) ----------------
+// 検索時の「試行60反復」の順位は最終的な当てはまりを予測しきれない(§5-D の測定)。
+// そこでカードを明示的に選んでいない場合は、提示中の候補を順に本最適化して最良を採る。
+// 現在の勝者も必ず対象に含まれるので、この方式で結果が悪化することはない。
 let optRunning = false;
 document.getElementById("btnOpt").addEventListener("click", () => {
-  if (!state.selected || optRunning) return;
+  if (!state.selected || optRunning || !state.candidates.length) return;
   optRunning = true;
   updateButtons();
-  // 変数が増えると Nelder-Mead の収束が遅くなるため、高次元の機構だけ反復数を増やす
-  // (6節リンクは機構12 + 配置4 = 16次元。既存3機構の挙動は変えない)
-  const MAXIT = state.selected.mech.dim >= 10 ? 900 : 450;
-  const nm = makeNelderMead(state.selected.obj, state.selected.x, MAXIT);
+  stopPlayback();
+
+  const idxs = state.userPicked ? [state.selectedIndex] : state.candidates.map((_, i) => i);
+  const results = [];
+  let k = 0, nm = null, cur = null, MAXIT = 0;
+
+  const beginOne = () => {
+    const i = idxs[k], s = state.candidates[i];
+    cur = candidateInit(s);
+    // 変数が増えると Nelder-Mead の収束が遅くなるため、高次元の機構だけ反復数を増やす
+    // (6節リンクは機構12 + 配置4 = 16次元)
+    MAXIT = cur.mech.dim >= 10 ? 900 : 450;
+    nm = makeNelderMead(cur.obj, cur.x0, MAXIT);
+    // 最適化中の候補を画面に映す(候補ごとに機構が切り替わる様子が見える)
+    document.querySelectorAll(".cand").forEach((el, m) => el.classList.toggle("sel", m === i));
+    state.selectedIndex = i;
+    state.selected = { entry: s.e, mech: cur.mech, mirror: cur.mirror, obj: cur.obj, x: cur.x0 };
+    state.optimizedX = cur.x0.slice();
+    state.objVal = cur.v;
+    document.getElementById("tbMech").textContent = cur.mech.name + (s.e.ratio !== undefined ? ` r=${s.e.ratio}` : "");
+  };
+  beginOne();
+
   function step() {
     const r = nm.step(20);
     state.optimizedX = r.x;
     state.objVal = r.f;
-    document.getElementById("optProg").style.width = (100 * r.it / MAXIT) + "%";
-    document.getElementById("optStatus").textContent = `反復 ${r.it}/${MAXIT} — F = ${r.f.toFixed(2)} px²(RMS ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
+    const doneRatio = (k + r.it / MAXIT) / idxs.length;
+    document.getElementById("optProg").style.width = (100 * doneRatio) + "%";
+    document.getElementById("optStatus").textContent = idxs.length > 1
+      ? `候補 ${k + 1}/${idxs.length} を最適化中 — F = ${r.f.toFixed(2)} px²`
+      : `反復 ${r.it}/${MAXIT} — F = ${r.f.toFixed(2)} px²(RMS ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
     document.getElementById("tbObj").textContent = r.f.toFixed(1) + " px²";
-    if (!state.playing) render();
-    if (!r.done) requestAnimationFrame(step);
-    else {
-      optRunning = false;
-      document.getElementById("optStatus").textContent = `最適化完了 — F = ${r.f.toFixed(2)} px²(RMS誤差 ${Math.sqrt(Math.max(r.f, 0)).toFixed(1)} px)`;
-      updateButtons();
-      maybeAutoFit();
-      startPlayback();
-    }
+    render();
+    if (!r.done) { requestAnimationFrame(step); return; }
+
+    results.push({ i: idxs[k], x: r.x.slice(), f: r.f, sel: state.selected });
+    state.candidates[idxs[k]].final = r.f;
+    k++;
+    if (k < idxs.length) { beginOne(); requestAnimationFrame(step); return; }
+
+    // 最良の候補を採る
+    let b = 0;
+    for (let m = 1; m < results.length; m++) if (results[m].f < results[b].f) b = m;
+    const win = results[b];
+    optRunning = false;
+    renderCandidates();
+    document.querySelectorAll(".cand").forEach((el, m) => el.classList.toggle("sel", m === win.i));
+    state.selectedIndex = win.i;
+    state.selected = win.sel;
+    state.optimizedX = win.x;
+    state.objVal = win.f;
+    const rms = Math.sqrt(Math.max(win.f, 0)).toFixed(1);
+    document.getElementById("tbMech").textContent = win.sel.mech.name + (win.sel.entry.ratio !== undefined ? ` r=${win.sel.entry.ratio}` : "");
+    document.getElementById("tbObj").textContent = win.f.toFixed(1) + " px²";
+    document.getElementById("optProg").style.width = "100%";
+    document.getElementById("optStatus").textContent = idxs.length > 1
+      ? `${idxs.length} 候補を最適化し、候補 ${win.i + 1} を採用 — F = ${win.f.toFixed(2)} px²(RMS誤差 ${rms} px)`
+      : `最適化完了 — F = ${win.f.toFixed(2)} px²(RMS誤差 ${rms} px)`;
+    updateButtons();
+    maybeAutoFit();
+    startPlayback();
   }
   requestAnimationFrame(step);
 });
@@ -1814,7 +1891,7 @@ document.getElementById("btnExpDXF").addEventListener("click", () =>
 
 function updateButtons() {
   renderExportPanel();
-  document.getElementById("btnSearch").disabled = !(state.dbReady && state.targetFeat);
+  document.getElementById("btnSearch").disabled = !(state.dbReady && state.targetFeat) || searching;
   document.getElementById("btnOpt").disabled = !(state.selected && !optRunning && state.objVal < 1e8);
   document.getElementById("btnPlay").disabled = !state.selected;
 }

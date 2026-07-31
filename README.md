@@ -29,10 +29,10 @@ Download `index.html` and open it in a browser. No external libraries, build ste
 
 1. **目標曲線を描く / Sketch** — 図面キャンバス上にドラッグで閉曲線を描きます。プリセット(楕円・豆型・8の字・おむすび・歩行軌道)も選べます。
    Draw a closed target curve on the drafting canvas, or pick a preset.
-2. **機構を検索 / Search** — 事前サンプリング済みデータベースから、曲線特徴量メトリックにより上位3候補の機構を提示します。カードをクリックして候補を切り替えられます。
-   The top-3 candidate mechanisms from the precomputed database are shown as clickable cards.
-3. **パラメータ最適化 / Optimize** — 選択した機構の寸法・取付点・配置を最適化し、マーカー軌跡と目標曲線の二乗誤差を最小化します。
-   The selected mechanism's dimensions, attachment point, and placement are refined to minimize the squared error between the traced curve and the target.
+2. **機構を検索 / Search** — 事前サンプリング済みデータベースから機構タイプごとに候補を拾い、それぞれを短時間だけ試行最適化してから、当てはまりの良い順に4候補を提示します。カードをクリックして候補を切り替えられます。
+   Candidates are gathered per mechanism type, briefly trial-optimized, and the best four are shown as clickable cards.
+3. **パラメータ最適化 / Optimize** — 提示中の候補すべての寸法・取付点・配置を最適化し、マーカー軌跡と目標曲線の二乗誤差が最小になった候補を採用します(カードをクリックして選んだ場合は、その候補だけを最適化)。
+   All shown candidates are optimized and the best-fitting one is adopted; clicking a card restricts optimization to that candidate.
 4. **駆動・確認 / Play** — 単一の入力クランクで機構を駆動し、軌跡と目標曲線を重ねて確認します。速度調整と表示切替(目標曲線 / 軌跡 / 歯車)が可能です。
    The mechanism is driven by a single input crank, with speed control and display toggles.
 
@@ -83,7 +83,7 @@ Optimized mechanisms are often several times larger than the target curve, so th
 | 機構ライブラリ | パラメータ化された駆動機構群(§4, Fig. 4) | 4種:4節リンク、歯車駆動5節リンク(歯車比 −2, −1, 1, 2 の4変種)、クランク・スライダ、Stephenson 型6節リンク |
 | 機構シミュレーション | 制約ベースシミュレーション+Newton–Raphson(§3) | 閉形式の順運動学(円交点計算+分岐の連続性チェック) |
 | パラメータ空間探索 | メトリック空間での Poisson-disk サンプリング(§4.1) | 特徴量空間での Poisson-disk 型棄却サンプリング(起動時に約1,040曲線を構築) |
-| 曲線メトリック | 特徴量ベース+係数の対話学習(§5) | 特徴量(長さ・面積・楕円率・自己交差数)+頂点距離。係数は固定値 |
+| 曲線メトリック | 特徴量ベース+係数の対話学習(§5) | 特徴量(長さ・面積・楕円率・自己交差数)+頂点距離。**係数は固定値**(下記の注記を参照) |
 | 連続最適化 | 陰関数定理による勾配+BFGS(§4.2, 式(2)–(4)) | Nelder–Mead 法(機構パラメータ+相似変換を同時最適化) |
 | 駆動 | 単一入力ドライバ(§6.1) | 単一クランク駆動のアニメーション |
 | 表示 | ―(論文の対象外) | 図面ビューのズーム・パン、1周期分の外接矩形への自動フィット |
@@ -94,14 +94,25 @@ Optimized mechanisms are often several times larger than the target curve, so th
 
 Timing control via non-circular gears (§4.3), automatic gear-train generation (§6.1), collision-free layering (§6.2), support-structure generation (§6.3), fabrication export (§6.4), and interactive metric training (§5.2) are out of scope.
 
+### 注記:曲線メトリックの係数を学習しなかった理由 / Note on the fixed metric coefficients
+
+論文 §5.2 は、曲線メトリックの係数をユーザのフィードバックから反復的に学習します（似ている/似ていない曲線ペアを選ばせ、距離計量学習で係数を解く）。本実装はこれを実装せず固定値のままにしていますが、**単に手を抜いたのではなく、実装前に効果を測定して見送った**という経緯があります。
+
+係数を 4,322 通り総当たりしたところ、プリセット5種の目的関数の合計は最良でも 100.4 → 93.1 にしか下がらず、しかもそれを達成するのは「楕円率だけを見る」退化した係数でした。対話学習がそこへ到達する見込みは薄く、非退化な係数に限ると別のプリセットが悪化します。
+
+理由は、**本実装では検索の役割が論文と異なる**ためです。論文はメトリックの順位がそのまま機構の選択に直結しますが、本実装は候補を試行最適化した結果で勝者を決めるため、**メトリックは「どの候補を土俵に載せるか」だけを担い、勝敗には直接効きません**。実際、取りこぼしの原因は係数ではなく勝者の選び方にあり、そちらを直すことで合計 100.4 → 90.2（理論下限 ≈87.5）まで改善しました。
+
+The fixed coefficients are a measured decision, not an omission: an exhaustive sweep showed that learning them would yield little, because in this implementation the metric only determines the candidate pool while the winner is decided by the optimization result.
+
 ## 技術メモ / Technical notes
 
-- 依存ライブラリなしの単一 HTML(Canvas 2D + Vanilla JS、約1,830行)
+- 依存ライブラリなしの単一 HTML(Canvas 2D + Vanilla JS、約1,900行)
 - 曲線は等弧長で 72 点にリサンプリングして比較。位相(タイミング)情報は論文同様に破棄し、巡回オフセットと向きを総当たりで対応付け
-- 検索は特徴量距離で上位40件に絞ってから頂点距離で再ランキング
-- 最適化は最大450反復の Nelder–Mead をフレーム分割実行(UI を停止させない)。プリセット曲線に対して RMS 誤差 1〜16 px(目標曲線 約360 px 規模)、実行時間 0.1 秒未満
+- 検索は**機構タイプごとに**特徴量距離で上位20件へ絞り、頂点距離で再ランキングして各タイプ2件(計8件)を拾う。全体で上位N件を取ると、当てはまりの良い1タイプが枠を占有してしまうため
+- 拾った8候補は**それぞれ60反復だけ試行最適化**し、その結果順に並べ替えて上位4件を提示する。曲線メトリックの順位も初期目的関数値も、最終的な当てはまりを予測しきれないため
+- 試行最適化の順位も完全ではないので、**手順03では提示中の候補すべてを本最適化して最良を採用**する。現在の先頭候補も必ず対象に含まれるため、この方式で結果が悪化することはない。カードには `metric d` / `試行 F` / `最適化後 F` が並び、**三者の順位が一致しないことが見て取れる**
+- 最適化は最大450反復の Nelder–Mead をフレーム分割実行(UI を停止させない)。検索の試行最適化も同様に分割実行する。プリセット曲線に対して RMS 誤差 0.2〜8.3 px、検索+最適化で 0.4〜0.8 秒程度
 - 鏡映対称の曲線に対応するため、初期化時に回転 {0, π} × 鏡映 {あり, なし} の4通りを評価して最良の初期値を選択
-- 候補の**提示順は曲線メトリック順**だが、**自動選択は初期目的関数 F が最良の候補**にしている。メトリックの順位と実際の当てはまりは一致しないことがあるため(候補カードに両方の値を表示)
 - 6節リンクは Stephenson 型。4節ループを解いて連結節上の点 C を求め、それを入力とする第2ダイアド(C-D-O6)を再び円交点で解く2段構成。閉形式のまま解ける
 - 6節リンクの DB サンプリングは、12個のパラメータを独立に振ると第2ループがほぼ成立しないため、**先に4節ループを解いて C の軌跡を求め、`|C-O6|` の最小・最大から第2ループが必ず解ける `e`, `f` を逆算**している。これで実現可能率が 96% になった
 - 変数が増えると Nelder–Mead の収束が遅くなるため、6節リンク(機構12 + 配置4 = 16次元)のみ最大反復数を 900 にしている(他の機構は 450 のまま)
