@@ -820,15 +820,26 @@ const state = {
   objVal: null
 };
 
+// ★キャンバスの描画バッファは、CSS 上の表示サイズと必ず一致させること。
+// ずれると canvas が非等方に引き伸ばされ、グリッドの正方形が長方形になり、
+// 剛体であるはずのリンクまで回転に応じて伸縮して見える。
+// 右パネルは候補カードや出力パネルで高さが変わるため、
+// ウィンドウの resize イベントだけでは追随できない(ResizeObserver で図面領域を監視する)。
 function resize() {
   const sheet = document.getElementById("sheet");
   const r = sheet.getBoundingClientRect();
-  W = Math.max(200, r.width); H = Math.max(200, r.height);
-  cv.width = W * DPR; cv.height = H * DPR;
+  const w = Math.max(200, r.width), h = Math.max(200, r.height);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (w === W && h === H && dpr === DPR) return;   // 変化が無ければ再描画しない
+  W = w; H = h; DPR = dpr;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   render();
 }
 window.addEventListener("resize", resize);
+if (typeof ResizeObserver === "function") {
+  new ResizeObserver(resize).observe(document.getElementById("sheet"));
+}
 
 // ---------------- Database build (chunked) ----------------
 let seed = 987654321;
